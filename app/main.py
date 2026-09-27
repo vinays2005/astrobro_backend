@@ -53,11 +53,11 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
+        allow_origins=["*"] if using_wildcard else origins,
+        allow_credentials=False if using_wildcard else True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
 
     # Request ID tracing
