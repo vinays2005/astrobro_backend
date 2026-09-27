@@ -23,6 +23,7 @@ Pillow==11.0.0
 # Database
 SQLAlchemy==2.0.36
 aiosqlite==0.20.0
+asyncpg==0.30.0
 
 # Security
 slowapi==0.1.9
