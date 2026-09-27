@@ -1,0 +1,72 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ── Virtual envs ──
+venv/
+venv*/
+venv311/
+env/
+ENV/
+.venv/
+
+# ── Environment secrets ──
+.env
+.env.*
+!.env.example
+
+# ── Firebase / GCP credentials ──
+serviceAccountKey.json
+*firebase-adminsdk*.json
+*-credentials.json
+
+# ── Caches ──
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Databases ──
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Vector DB / index artifacts ──
+data/chroma/
+data/faiss/
+data/embeddings/
+*.faiss
+*.pkl
+*.index
+
+# ── Data folder (usually not meant for git) ──
+# Uncomment if 'data/' only has runtime/generated stuff, not source data you want tracked
+# data/
+
+# ── OS junk ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Logs ──
+*.log
+logs/
+
+# ── Junk ──
+__pycache__.zip
+books_test/
+app/books/
