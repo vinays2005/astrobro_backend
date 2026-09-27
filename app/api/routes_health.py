@@ -9,30 +9,34 @@ router = APIRouter(prefix="/api", tags=["health"])
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    """Check system health — Ollama + vector DB connectivity."""
-    ollama_ok = False
-    chroma_count = 0
+    """Check system health — Groq + vector DB connectivity."""
+    llm_ok = False
+    vector_count = 0
 
     try:
-        import ollama
-        client = ollama.Client()
-        client.list()
-        ollama_ok = True
+        import os
+        from groq import Groq
+        client = Groq(api_key=os.environ["GROQ_API_KEY"])
+        # Cheap connectivity check — lists models rather than spending
+        # tokens on a completion call.
+        client.models.list()
+        llm_ok = True
     except Exception:
         pass
 
     try:
-        import chromadb
+        from qdrant_client import QdrantClient
         from app.config import get_settings
         s = get_settings()
-        db = chromadb.PersistentClient(path=s.chroma_persist_dir)
-        col = db.get_or_create_collection(s.books_collection)
-        chroma_count = col.count()
+        client = QdrantClient(url=s.qdrant_url, api_key=s.qdrant_api_key or None)
+        if client.collection_exists(s.books_collection):
+            info = client.get_collection(s.books_collection)
+            vector_count = info.points_count or 0
     except Exception:
         pass
 
     return HealthResponse(
         status="ok",
-        ollama_connected=ollama_ok,
-        vector_db_chunks=chroma_count,
+        llm_connected=llm_ok,
+        vector_db_chunks=vector_count,
     )

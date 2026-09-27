@@ -65,8 +65,10 @@ async def ingest_book(
 
         retriever = HybridRetriever(
             embedding_model=_settings.embedding_model,
-            persist_dir=_settings.chroma_persist_dir,
+            qdrant_url=_settings.qdrant_url,
+            qdrant_api_key=_settings.qdrant_api_key,
             collection_name=_settings.books_collection,
+            embedding_dimension=_settings.embedding_dimension,
             reranker_enabled=False,
         )
         retriever.add_chunks(result.chunks)
@@ -89,20 +91,28 @@ async def ingest_book(
 async def list_books() -> dict:
     """List all books currently indexed in the vector store."""
     try:
-        import chromadb
-        client = chromadb.PersistentClient(path=_settings.chroma_persist_dir)
-        col = client.get_or_create_collection(_settings.books_collection)
-        total = col.count()
+        from qdrant_client import QdrantClient
+        client = QdrantClient(url=_settings.qdrant_url, api_key=_settings.qdrant_api_key or None)
 
-        # Get unique book titles from metadata
+        if not client.collection_exists(_settings.books_collection):
+            return {"total_chunks": 0, "books": []}
+
+        info = client.get_collection(_settings.books_collection)
+        total = info.points_count or 0
+
+        # Get unique book titles from metadata — scroll through payloads
+        # (Qdrant's equivalent of Chroma's .get(limit=..., include=[...]))
+        books: dict[str, int] = {}
         if total > 0:
-            sample = col.get(limit=min(total, 1000), include=["metadatas"])
-            books: dict[str, int] = {}
-            for meta in (sample.get("metadatas") or []):
-                book_title = str(meta.get("book", "Unknown"))
+            points, _ = client.scroll(
+                collection_name=_settings.books_collection,
+                limit=min(total, 1000),
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                book_title = str((point.payload or {}).get("book", "Unknown"))
                 books[book_title] = books.get(book_title, 0) + 1
-        else:
-            books = {}
 
         return {
             "total_chunks": total,

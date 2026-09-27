@@ -29,12 +29,15 @@ class HybridRetriever:
         self,
         embedding_model: str = "all-MiniLM-L6-v2",
         reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2",
-        persist_dir: str = "./data/chroma",
+        qdrant_url: str = "",
+        qdrant_api_key: str = "",
         collection_name: str = "vedic_books",
+        embedding_dimension: int = 384,
         reranker_enabled: bool = True,
     ) -> None:
         from sentence_transformers import SentenceTransformer
-        import chromadb
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Distance, VectorParams
 
         self._embedder = SentenceTransformer(embedding_model)
         self._reranker_enabled = reranker_enabled
@@ -43,11 +46,19 @@ class HybridRetriever:
             from sentence_transformers import CrossEncoder
             self._reranker = CrossEncoder(reranker_model)
 
-        self._chroma = chromadb.PersistentClient(path=persist_dir)
-        self._collection = self._chroma.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        self._collection_name = collection_name
+        self._qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key or None)
+
+        # Qdrant needs the collection created up front with a fixed vector
+        # size/distance metric — unlike Chroma's get_or_create, so check
+        # existence first (idempotent across restarts).
+        if not self._qdrant.collection_exists(collection_name):
+            self._qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(
+                    size=embedding_dimension, distance=Distance.COSINE
+                ),
+            )
 
         self._bm25: Any = None
         self._bm25_docs: list[dict[str, Any]] = []
@@ -57,6 +68,8 @@ class HybridRetriever:
     def add_chunks(self, chunks: list[Any], batch_size: int = 256) -> None:
         """Index chunks into vector store and rebuild BM25."""
         from app.rag.ingestion import Chunk  # type: ignore[import]
+        from qdrant_client.models import PointStruct
+
         texts = [c.text for c in chunks]
         metas = [c.metadata for c in chunks]
         ids = [c.chunk_id for c in chunks]
@@ -66,7 +79,21 @@ class HybridRetriever:
             bm = metas[i:i + batch_size]
             bi = ids[i:i + batch_size]
             embeddings = self._embedder.encode(bt, normalize_embeddings=True).tolist()
-            self._collection.upsert(ids=bi, documents=bt, metadatas=bm, embeddings=embeddings)
+
+            # Qdrant point IDs must be unsigned int or UUID — our chunk_ids
+            # are hex strings (sha256[:16]), so use them as a UUID5 seed to
+            # get a stable, valid point ID, and stash the original chunk_id
+            # in the payload for lookups/dedup elsewhere.
+            import uuid
+            points = [
+                PointStruct(
+                    id=str(uuid.uuid5(uuid.NAMESPACE_OID, chunk_id)),
+                    vector=emb,
+                    payload={**meta, "text": text, "chunk_id": chunk_id},
+                )
+                for chunk_id, text, meta, emb in zip(bi, bt, bm, embeddings)
+            ]
+            self._qdrant.upsert(collection_name=self._collection_name, points=points)
 
         self._bm25_docs = [
             {"text": t, "metadata": m, "id": i}
@@ -85,24 +112,35 @@ class HybridRetriever:
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[RetrievedChunk]:
         """Hybrid retrieval: vector + BM25 → RRF merge → optional rerank."""
-        query_emb = self._embedder.encode([query], normalize_embeddings=True).tolist()
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        where = metadata_filter if metadata_filter else None
-        vec_results = self._collection.query(
-            query_embeddings=query_emb,
-            n_results=min(top_k, self._collection.count() or 1),
-            where=where,
-        )
+        query_emb = self._embedder.encode([query], normalize_embeddings=True).tolist()[0]
 
-        vector_chunks: list[RetrievedChunk] = []
-        if vec_results.get("documents"):
-            for i, doc in enumerate(vec_results["documents"][0]):
-                vector_chunks.append(RetrievedChunk(
-                    text=doc,
-                    metadata=vec_results["metadatas"][0][i],
-                    score=1.0 - float(vec_results["distances"][0][i]),
-                    source="vector",
-                ))
+        qfilter = None
+        if metadata_filter:
+            qfilter = Filter(
+                must=[
+                    FieldCondition(key=k, match=MatchValue(value=v))
+                    for k, v in metadata_filter.items()
+                ]
+            )
+
+        vec_results = self._qdrant.query_points(
+            collection_name=self._collection_name,
+            query=query_emb,
+            limit=top_k,
+            query_filter=qfilter,
+        ).points
+
+        vector_chunks: list[RetrievedChunk] = [
+            RetrievedChunk(
+                text=str(point.payload.get("text", "")),
+                metadata={k: v for k, v in (point.payload or {}).items() if k != "text"},
+                score=float(point.score),
+                source="vector",
+            )
+            for point in vec_results
+        ]
 
         bm25_chunks: list[RetrievedChunk] = []
         if self._bm25 is not None and self._bm25_docs:

@@ -42,8 +42,9 @@ class Settings(BaseSettings):
     reranker_top_k: int = 5
 
     # Vector DB
-    vector_db: Literal["chroma"] = "chroma"
-    chroma_persist_dir: str = "./data/chroma"
+    vector_db: Literal["qdrant"] = "qdrant"
+    qdrant_url: str = ""
+    qdrant_api_key: str = ""
     books_collection: str = "vedic_books"
 
     # Astrology

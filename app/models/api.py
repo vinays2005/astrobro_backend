@@ -149,5 +149,5 @@ class ChatResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "1.0.0"
-    ollama_connected: bool = False
+    llm_connected: bool = False
     vector_db_chunks: int = 0
