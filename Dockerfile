@@ -1,5 +1,5 @@
 FROM python:3.11-slim
-
+# demo 
 # System deps for pyswisseph + pytesseract
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
