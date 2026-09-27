@@ -10,6 +10,7 @@ pyswisseph==2.10.3.2
 
 # LLM
 ollama==0.4.5
+groq==0.13.1
 
 # RAG
 chromadb==0.5.23
