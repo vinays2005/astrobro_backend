@@ -30,10 +30,10 @@ from app.config import get_settings
 # ── Language detection by folder / filename keywords ─────────────────────────
 # Maps lowercase keyword → tesseract lang code
 _LANG_HINTS: dict[str, str] = {
-    "hindi":     "hin",
-    "tajika_nilakanthi_hindi": "hin",
-    "dasha_phal": "hin",
-    "sanket":    "hin",
+    "hindi":     "hin+eng",
+    "tajika_nilakanthi_hindi": "hin+eng",
+    "dasha_phal": "hin+eng",
+    "sanket":    "hin+eng",
     "marathi":   "mar",
     "sanskrit":  "san",
     "nadi":      "san+eng",  # Nadi texts mix both
@@ -58,14 +58,14 @@ def _detect_lang(path: Path) -> str:
     folder = path.parent.name.lower()
     stem = path.stem.lower().replace("-", "_").replace(" ", "_")
 
-    # Check folder first
-    for key, lang in _FOLDER_LANGS.items():
-        if key in folder:
-            return lang
-
-    # Check filename
+    # Filename hints beat folder defaults (a Hindi book can sit in an
+    # "eng" folder).
     for key, lang in _LANG_HINTS.items():
         if key in stem:
+            return lang
+
+    for key, lang in _FOLDER_LANGS.items():
+        if key in folder:
             return lang
 
     return "eng"  # safe default
@@ -149,16 +149,62 @@ def _ingest_docx(path: Path, meta: dict) -> list:
         return []
 
 
-def main(books_dir: str, dry_run: bool = False, skip_ocr: bool = False) -> None:
+def _make_qdrant(settings):
+    """Qdrant client used only for the --skip-existing lookup."""
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import PayloadSchemaType
+
+    client = QdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key or None,
+        timeout=120,
+    )
+    try:
+        client.create_payload_index(
+            settings.books_collection, "book", PayloadSchemaType.KEYWORD
+        )
+    except Exception:
+        pass  # index exists already; filtering still works without it
+    return client
+
+
+def _already_indexed(client, collection: str, book: str) -> bool:
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+    try:
+        res = client.count(
+            collection_name=collection,
+            count_filter=Filter(
+                must=[FieldCondition(key="book", match=MatchValue(value=book))]
+            ),
+            exact=True,
+        )
+        return res.count > 0
+    except Exception as exc:
+        print(f"   WARNING: could not check DB for '{book}': {exc}")
+        return False
+
+
+def main(
+    books_dir: str,
+    dry_run: bool = False,
+    skip_ocr: bool = False,
+    skip_existing: bool = False,
+    exclude: list[str] | None = None,
+) -> None:
     settings = get_settings()
 
     ingestor = PDFIngestor(chunk_size=800, chunk_overlap=150)
     retriever = HybridRetriever(
         embedding_model=settings.embedding_model,
-        persist_dir=settings.chroma_persist_dir,
+        qdrant_url=settings.qdrant_url,
+        qdrant_api_key=settings.qdrant_api_key,
         collection_name=settings.books_collection,
+        embedding_dimension=settings.embedding_dimension,
         reranker_enabled=False,
     )
+
+    qclient = _make_qdrant(settings) if skip_existing else None
 
     books_path = Path(books_dir)
     if not books_path.exists():
@@ -170,15 +216,23 @@ def main(books_dir: str, dry_run: bool = False, skip_ocr: bool = False) -> None:
     docxs = sorted(books_path.rglob("*.docx"))
     all_files = pdfs + docxs
 
+    if exclude:
+        ex = [e.lower() for e in exclude]
+        all_files = [
+            f for f in all_files
+            if not any(e in str(f.relative_to(books_path)).lower() for e in ex)
+        ]
+
     if not all_files:
         print(f"No PDF or DOCX files found under {books_path}")
         return
 
-    print(f"Found {len(pdfs)} PDFs + {len(docxs)} DOCX files\n")
+    print(f"Found {len(all_files)} files ({len(pdfs)} PDFs + {len(docxs)} DOCX before --exclude)\n")
 
     total_chunks  = 0
     total_errors: list[str] = []
     skipped_ocr   = 0
+    skipped_existing = 0
 
     for file_path in all_files:
         meta = _build_meta(file_path)
@@ -187,8 +241,15 @@ def main(books_dir: str, dry_run: bool = False, skip_ocr: bool = False) -> None:
         print(f"── {rel}")
         print(f"   lang={meta['language']}  folder_tag={meta['topic_tags']}")
 
+        if qclient is not None and _already_indexed(
+            qclient, settings.books_collection, str(meta["book"])
+        ):
+            print("   SKIP (already indexed)\n")
+            skipped_existing += 1
+            continue
+
         if dry_run:
-            print("   [DRY RUN] skip\n")
+            print("   [DRY RUN] would ingest\n")
             continue
 
         # ── DOCX ─────────────────────────────────────────────
@@ -240,7 +301,7 @@ def main(books_dir: str, dry_run: bool = False, skip_ocr: bool = False) -> None:
             skipped_ocr += 1
             continue
 
-        result = ingestor.ingest(file_path, book_meta=meta)
+        result = ingestor.ingest(file_path, book_meta=meta, progress=True)
 
         print(f"   pages={result.pages_processed}  skipped={result.pages_skipped}  chunks={len(result.chunks)}")
 
@@ -272,11 +333,12 @@ def main(books_dir: str, dry_run: bool = False, skip_ocr: bool = False) -> None:
     print(f"Total chunks indexed : {total_chunks}")
     print(f"Total files          : {len(all_files)}")
     print(f"Skipped (no OCR)     : {skipped_ocr}")
+    print(f"Skipped (already in DB): {skipped_existing}")
     if total_errors:
         print(f"Total errors         : {len(total_errors)}")
     print("\nDone!")
     print("\nTip: search the DB with:")
-    print("  curl http://localhost:8000/api/books/list")
+    print("  curl https://astrobrobackend-production.up.railway.app/api/books/list")
 
 
 if __name__ == "__main__":
@@ -289,5 +351,15 @@ if __name__ == "__main__":
                         help="List files without indexing")
     parser.add_argument("--skip-ocr", action="store_true",
                         help="Skip files that appear scanned (no text extracted)")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="Skip books whose title is already in the vector DB")
+    parser.add_argument("--exclude", action="append", default=[],
+                        help="Skip files whose relative path contains this text (repeatable)")
     args = parser.parse_args()
-    main(args.books_dir, dry_run=args.dry_run, skip_ocr=args.skip_ocr)
+    main(
+        args.books_dir,
+        dry_run=args.dry_run,
+        skip_ocr=args.skip_ocr,
+        skip_existing=args.skip_existing,
+        exclude=args.exclude,
+    )

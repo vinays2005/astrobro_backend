@@ -43,6 +43,8 @@ class PDFIngestor:
         # result.chunks ready for HybridRetriever.add_chunks()
     """
 
+    _ocr_warned: bool = False
+
     def __init__(
         self,
         chunk_size: int = 800,
@@ -53,7 +55,12 @@ class PDFIngestor:
         self.chunk_overlap = chunk_overlap
         self.min_chunk_size = min_chunk_size
 
-    def ingest(self, pdf_path: str | Path, book_meta: dict[str, object]) -> IngestionResult:
+    def ingest(
+        self,
+        pdf_path: str | Path,
+        book_meta: dict[str, object],
+        progress: bool = False,
+    ) -> IngestionResult:
         """Full pipeline for one PDF. Returns chunks + per-page errors."""
         try:
             import fitz  # PyMuPDF
@@ -69,13 +76,17 @@ class PDFIngestor:
         errors: list[str] = []
         pages_skipped = 0
 
+        ocr_lang = str(book_meta.get("language", "eng"))
+
         for page_num in range(len(doc)):
+            if progress and page_num and page_num % 25 == 0:
+                print(f"   ...page {page_num}/{len(doc)}", flush=True)
             try:
                 page = doc[page_num]
                 text: str = page.get_text("text")  # type: ignore[call-arg]
 
                 if not text.strip():
-                    text = self._ocr_page(page)
+                    text = self._ocr_page(page, ocr_lang)
 
                 cleaned = self._clean_text(text)
                 if len(cleaned) < 20:
@@ -106,17 +117,33 @@ class PDFIngestor:
 
     # ── Internal ──────────────────────────────────────────────
 
-    def _ocr_page(self, page: object) -> str:
+    def _ocr_page(self, page: object, lang: str = "eng") -> str:
         try:
+            import io
+            import os
+
             import pytesseract
             from PIL import Image
+
+            cmd = os.environ.get("TESSERACT_CMD")
+            if cmd:
+                pytesseract.pytesseract.tesseract_cmd = cmd
+
             Image.MAX_IMAGE_PIXELS = None  # disable bomb check for large scans
-            import io
             pix = page.get_pixmap(dpi=150)  # lower dpi = faster, less RAM
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            return str(pytesseract.image_to_string(img))
-        except Exception:
+            try:
+                return str(pytesseract.image_to_string(img, lang=lang))
+            except pytesseract.TesseractError:
+                # Language pack not installed -> fall back to English.
+                return str(pytesseract.image_to_string(img, lang="eng"))
+        except Exception as exc:
+            # Fail loud once per run instead of silently dropping every page.
+            if not PDFIngestor._ocr_warned:
+                PDFIngestor._ocr_warned = True
+                print(f"   OCR WARNING (pages will come out empty): {exc}", flush=True)
             return ""
+
     def _clean_text(self, text: str) -> str:
         text = re.sub(r"\n\s*\d+\s*\n", "\n", text)  # standalone page numbers
         text = re.sub(r"[ \t]+", " ", text)

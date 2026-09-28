@@ -103,16 +103,20 @@ async def list_books() -> dict:
         # Get unique book titles from metadata — scroll through payloads
         # (Qdrant's equivalent of Chroma's .get(limit=..., include=[...]))
         books: dict[str, int] = {}
-        if total > 0:
-            points, _ = client.scroll(
+        offset = None
+        while True:
+            points, offset = client.scroll(
                 collection_name=_settings.books_collection,
-                limit=min(total, 1000),
-                with_payload=True,
+                limit=500,
+                offset=offset,
+                with_payload=["book"],
                 with_vectors=False,
             )
             for point in points:
                 book_title = str((point.payload or {}).get("book", "Unknown"))
                 books[book_title] = books.get(book_title, 0) + 1
+            if offset is None:
+                break
 
         return {
             "total_chunks": total,
