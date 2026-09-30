@@ -47,7 +47,7 @@ class HybridRetriever:
             self._reranker = CrossEncoder(reranker_model)
 
         self._collection_name = collection_name
-        self._qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key or None)
+        self._qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key or None,timeout=120,)
 
         # Qdrant needs the collection created up front with a fixed vector
         # size/distance metric — unlike Chroma's get_or_create, so check
@@ -65,7 +65,7 @@ class HybridRetriever:
 
     # ── Indexing ──────────────────────────────────────────────
 
-    def add_chunks(self, chunks: list[Any], batch_size: int = 256) -> None:
+    def add_chunks(self, chunks: list[Any], batch_size: int = 64) -> None:
         """Index chunks into vector store and rebuild BM25."""
         from app.rag.ingestion import Chunk  # type: ignore[import]
         from qdrant_client.models import PointStruct
@@ -93,7 +93,19 @@ class HybridRetriever:
                 )
                 for chunk_id, text, meta, emb in zip(bi, bt, bm, embeddings)
             ]
-            self._qdrant.upsert(collection_name=self._collection_name, points=points)
+            for attempt in range(3):
+                try:
+                    self._qdrant.upsert(
+                        collection_name=self._collection_name,
+                        points=points,
+                        wait=True,
+                    )
+                    break
+                except Exception:
+                    if attempt == 2:
+                        raise
+                    import time
+                    time.sleep(2 ** attempt)
 
         self._bm25_docs = [
             {"text": t, "metadata": m, "id": i}

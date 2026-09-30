@@ -55,23 +55,30 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/astrobro.db"
 
+    # LLM provider keys (read from env/Railway, never hardcoded)
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-20b"
+    groq_classifier_model: str = "openai/gpt-oss-20b"
+
     # Security
     rate_limit_per_minute: int = 60
+    api_key: str = ""  # X-API-Key header — empty = disabled (dev), set in prod
 
     # Observability
     log_level: str = "INFO"
 
-@field_validator("allowed_origins", mode="before")
-@classmethod
-def parse_origins(cls, v: str | list[str]) -> list[str]:
-    if isinstance(v, list):
-        return v
-    # Handle plain comma-separated: http://a.com,http://b.com
-    if isinstance(v, str) and not v.strip().startswith("["):
-        return [o.strip() for o in v.split(",") if o.strip()]
-    # Handle JSON array string: ["http://a.com","http://b.com"]
-    import json
-    return json.loads(v)
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def parse_origins(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, list):
+            return v
+        # Handle plain comma-separated: http://a.com,http://b.com
+        if isinstance(v, str) and not v.strip().startswith("["):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        # Handle JSON array string: ["http://a.com","http://b.com"]
+        import json
+        return json.loads(v)
+
 
 @lru_cache
 def get_settings() -> Settings:
