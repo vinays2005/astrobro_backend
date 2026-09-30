@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.agents.orchestrator import AgentOrchestrator
-from app.models.api import PredictionRequest, PredictionResponse
+from app.agents.singleton import get_orchestrator
+from app.models.api import PredictionRequest
 from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/prediction", tags=["prediction"])
@@ -17,7 +17,7 @@ async def get_prediction(request: PredictionRequest) -> dict:
 
     Pipeline: birth_data → kundli → rules → RAG → LLM → verify → response
     """
-    orchestrator = AgentOrchestrator()
+    orchestrator = get_orchestrator()
     try:
         result = await orchestrator.run(
             user_input=f"Give a detailed {request.topic} analysis for my chart",

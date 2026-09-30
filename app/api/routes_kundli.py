@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.agents.orchestrator import AgentOrchestrator
+from app.agents.singleton import get_orchestrator
 from app.astrology.engine import AstrologyEngine
 from app.models.api import (
     KundliRequest,
@@ -70,7 +70,7 @@ async def create_kundli(request: KundliRequest) -> KundliResponse:
 @router.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest) -> dict:
     """Full AI prediction pipeline for a topic."""
-    orchestrator = AgentOrchestrator()
+    orchestrator = get_orchestrator()
     result = await orchestrator.run(
         user_input=f"Give me a detailed {request.topic} analysis",
         birth_data=request.birth_data.model_dump(),
