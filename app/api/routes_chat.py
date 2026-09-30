@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from app.agents.orchestrator import AgentOrchestrator
+from app.agents.singleton import get_orchestrator
 from app.models.api import ChatRequest, ChatResponse
 from app.security.auth import require_api_key
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 @router.post("/", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
 async def chat(request: ChatRequest) -> dict:
     """Single-turn AI astrology chat."""
-    orchestrator = AgentOrchestrator()
+    orchestrator = get_orchestrator()
     result = await orchestrator.run(
         user_input=request.question,
         birth_data=request.birth_data.model_dump() if request.birth_data else None,
@@ -32,7 +32,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     Streaming AI astrology chat — sends chunks as Server-Sent Events.
     Flutter uses http streaming to receive tokens in real-time.
     """
-    orchestrator = AgentOrchestrator()
+    orchestrator = get_orchestrator()
 
     async def event_generator():
         # Send start event

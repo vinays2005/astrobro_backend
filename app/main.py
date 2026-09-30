@@ -23,9 +23,17 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("astrobro_starting", model=settings.ollama_llm_model, env=settings.app_env)
+    logger.info("astrobro_starting", model=settings.groq_model, env=settings.app_env)
     await init_db()
     logger.info("database_ready")
+
+    # Pre-load the orchestrator once — avoids reloading SentenceTransformer
+    # and CrossEncoder on every request (was adding 15-25s per call).
+    from app.agents.orchestrator import AgentOrchestrator
+    from app.agents.singleton import set_orchestrator
+    set_orchestrator(AgentOrchestrator())
+    logger.info("orchestrator_ready")
+
     yield
     logger.info("astrobro_stopping")
 

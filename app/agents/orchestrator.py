@@ -188,7 +188,8 @@ class AgentOrchestrator:
 
         evidence = await self._retriever.retrieve(
             query=f"{topic} {state.user_input}",
-            rerank_top_k=5,
+            top_k=8,
+            rerank_top_k=4,
         )
         for chunk in evidence:
             state.retrieved_evidence.append({
@@ -216,6 +217,7 @@ class AgentOrchestrator:
             prompt,
             system=SYSTEM_ASTROLOGER,
             json_mode=True,
+            max_tokens=1200,
         )
         interpretation = self._parse_json_response(raw)
 
@@ -230,6 +232,7 @@ class AgentOrchestrator:
             verify_prompt,
             system=SYSTEM_ASTROLOGER,
             json_mode=True,
+            max_tokens=600,
         )
         verification = self._parse_json_response(verify_raw)
 
@@ -274,7 +277,7 @@ class AgentOrchestrator:
     ) -> None:
         """Conversational: RAG → LLM chat → Response."""
         evidence = await self._retriever.retrieve(
-            query=state.user_input, rerank_top_k=4
+            query=state.user_input, top_k=6, rerank_top_k=3
         )
         for chunk in evidence:
             state.retrieved_evidence.append({
@@ -290,7 +293,7 @@ class AgentOrchestrator:
             chart_json=chart_json,
             dasha_json=dasha_json,
             evidence_json=evidence_wrapped,
-            history_json=json.dumps(history[-6:], indent=2),
+            history_json=json.dumps(history[-4:], indent=2),
             question=state.user_input,
         )
 
@@ -300,6 +303,7 @@ class AgentOrchestrator:
             system=SYSTEM_ASTROLOGER,
             temperature=0.4,
             json_mode=True,
+            max_tokens=900,
         )
         result = self._parse_json_response(raw)
 
