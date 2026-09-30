@@ -116,13 +116,16 @@ VERIFICATION_PROMPT = """Verify this astrology interpretation against the source
 === CHART DATA ===
 {chart_json}
 
+=== DASHA DATA ===
+{dasha_json}
+
 === RULE RESULTS ===
 {rules_json}
 
 Check each claim:
 1. Does every planetary position claim match chart data?
 2. Does every yoga claim match detected yogas?
-3. Does every dasha claim match dasha data?
+3. Does every dasha claim match dasha data (check mahadasha/antardasha lords and periods)?
 4. Are all house claims consistent with chart houses?
 5. Is the system consistently using sidereal zodiac?
 6. Any hallucinated sources?

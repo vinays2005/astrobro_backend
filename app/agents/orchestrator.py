@@ -18,6 +18,7 @@ from typing import Literal
 
 from app.agents.state import AstrologyState
 from app.astrology.engine import AstrologyEngine, Chart
+from app.config import get_settings
 from app.llm.provider import GroqProvider, LLMProvider
 from app.llm.prompts import (
     CHAT_PROMPT,
@@ -68,14 +69,23 @@ class AgentOrchestrator:
         # GroqProvider — callers (tests, a future non-Groq backend) can
         # inject any implementation. Only the *default* instantiated below
         # is Groq-specific.
+        _s = get_settings()
         self._engine = engine or AstrologyEngine()
         self._llm = llm or GroqProvider(
-            llm_model=os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant"),
-            classifier_model=os.environ.get(
+            api_key=_s.groq_api_key or os.environ.get("GROQ_API_KEY"),
+            llm_model=_s.groq_model or os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant"),
+            classifier_model=_s.groq_classifier_model or os.environ.get(
                 "GROQ_CLASSIFIER_MODEL", "llama-3.1-8b-instant"
             ),
         )
-        self._retriever = retriever or HybridRetriever()
+        self._retriever = retriever or HybridRetriever(
+            embedding_model=_s.embedding_model,
+            qdrant_url=_s.qdrant_url,
+            qdrant_api_key=_s.qdrant_api_key,
+            collection_name=_s.books_collection,
+            embedding_dimension=_s.embedding_dimension,
+            reranker_enabled=_s.reranker_enabled,
+        )
         self._rules = rules or RuleEngine()
 
     async def run(
@@ -212,6 +222,7 @@ class AgentOrchestrator:
         verify_prompt = VERIFICATION_PROMPT.format(
             interpretation_json=json.dumps(interpretation, indent=2),
             chart_json=chart_json,
+            dasha_json=dasha_json,
             rules_json=rules_json,
         )
         # json_mode=True — verification is also a structured JSON response

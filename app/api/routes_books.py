@@ -9,18 +9,19 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
 from app.config import get_settings
 from app.rag.ingestion import PDFIngestor
 from app.rag.retrieval import HybridRetriever
+from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 _settings = get_settings()
 _MAX_PDF_MB = 50
 
 
-@router.post("/ingest")
+@router.post("/ingest", dependencies=[Depends(require_api_key)])
 async def ingest_book(
     file: UploadFile = File(...),
     title: str = Form(...),

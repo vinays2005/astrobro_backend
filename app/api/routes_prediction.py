@@ -1,15 +1,16 @@
 """Prediction routes — topic-specific AI astrology analysis."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.agents.orchestrator import AgentOrchestrator
 from app.models.api import PredictionRequest, PredictionResponse
+from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/prediction", tags=["prediction"])
 
 
-@router.post("/", response_model=dict)
+@router.post("/", response_model=dict, dependencies=[Depends(require_api_key)])
 async def get_prediction(request: PredictionRequest) -> dict:
     """
     Full AI prediction for a specific life topic.

@@ -3,16 +3,17 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app.agents.orchestrator import AgentOrchestrator
 from app.models.api import ChatRequest, ChatResponse
+from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-@router.post("/", response_model=ChatResponse)
+@router.post("/", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
 async def chat(request: ChatRequest) -> dict:
     """Single-turn AI astrology chat."""
     orchestrator = AgentOrchestrator()
@@ -25,7 +26,7 @@ async def chat(request: ChatRequest) -> dict:
     return result
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=[Depends(require_api_key)])
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """
     Streaming AI astrology chat — sends chunks as Server-Sent Events.
