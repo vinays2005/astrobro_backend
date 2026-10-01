@@ -17,6 +17,7 @@ from app.api.routes_books import router as books_router
 from app.api.routes_prediction import router as prediction_router
 from app.api.routes_payment import router as payment_router
 from app.api.routes_report import router as report_router
+from app.api.routes_panchang import router as panchang_router
 from app.database.connection import init_db
 
 logger = structlog.get_logger()
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(prediction_router)
     app.include_router(payment_router)
     app.include_router(report_router)
+    app.include_router(panchang_router)
 
     @app.get("/")
     async def root():
