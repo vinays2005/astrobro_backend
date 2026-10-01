@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-20b"
     groq_classifier_model: str = "openai/gpt-oss-20b"
 
+    # Razorpay
+    razorpay_key_id: str = ""      # rzp_test_... or rzp_live_...
+    razorpay_key_secret: str = ""  # from Razorpay dashboard
+
+    # Report generation
+    # When True: paid PDF is granted without payment verification (dev/pre-launch mode)
+    # Set to False once Razorpay keys are live and verified
+    auto_approve_payments: bool = True
+    paid_report_price: int = 4900   # ₹49 in paise
+
     # Security
     rate_limit_per_minute: int = 60
     api_key: str = ""  # X-API-Key header — empty = disabled (dev), set in prod
