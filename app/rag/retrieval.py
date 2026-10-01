@@ -123,10 +123,20 @@ class HybridRetriever:
         rerank_top_k: int = 5,
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[RetrievedChunk]:
-        """Hybrid retrieval: vector + BM25 → RRF merge → optional rerank."""
+        """Hybrid retrieval: vector + BM25 → RRF merge → optional rerank.
+
+        All CPU-bound and blocking I/O calls are offloaded to a thread pool
+        via asyncio.to_thread() so the event loop stays free to serve other
+        requests concurrently.
+        """
+        import asyncio
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        query_emb = self._embedder.encode([query], normalize_embeddings=True).tolist()[0]
+        # CPU-bound: SentenceTransformer inference blocks the GIL — run in thread
+        raw_emb = await asyncio.to_thread(
+            self._embedder.encode, [query], normalize_embeddings=True
+        )
+        query_emb = raw_emb.tolist()[0]
 
         qfilter = None
         if metadata_filter:
@@ -137,12 +147,15 @@ class HybridRetriever:
                 ]
             )
 
-        vec_results = self._qdrant.query_points(
+        # I/O-bound: sync Qdrant HTTP call blocks the event loop — run in thread
+        qdrant_result = await asyncio.to_thread(
+            self._qdrant.query_points,
             collection_name=self._collection_name,
             query=query_emb,
             limit=top_k,
             query_filter=qfilter,
-        ).points
+        )
+        vec_results = qdrant_result.points
 
         vector_chunks: list[RetrievedChunk] = [
             RetrievedChunk(
@@ -156,7 +169,9 @@ class HybridRetriever:
 
         bm25_chunks: list[RetrievedChunk] = []
         if self._bm25 is not None and self._bm25_docs:
-            scores = self._bm25.get_scores(self._tokenize(query))
+            # CPU-bound: BM25 scores 34k docs in pure Python — run in thread
+            tokenized = self._tokenize(query)
+            scores = await asyncio.to_thread(self._bm25.get_scores, tokenized)
             top_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
             for idx in top_idx:
                 if scores[idx] > 0:
@@ -171,7 +186,8 @@ class HybridRetriever:
 
         if self._reranker_enabled and self._reranker is not None and merged:
             pairs = [(query, c.text) for c in merged[:top_k]]
-            rerank_scores = self._reranker.predict(pairs)
+            # CPU-bound: CrossEncoder inference — run in thread
+            rerank_scores = await asyncio.to_thread(self._reranker.predict, pairs)
             for chunk, score in zip(merged[:top_k], rerank_scores):
                 chunk.score = float(score)
                 chunk.source = "reranked"
