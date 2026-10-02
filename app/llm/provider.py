@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
 from groq import AsyncGroq, APIStatusError, APIConnectionError, APITimeoutError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 
 class LLMProvider(ABC):
@@ -52,7 +52,7 @@ def _is_retryable(exc: BaseException) -> bool:
 
 
 _retry_policy = retry(
-    retry=retry_if_exception_type(_RETRYABLE_EXC),
+    retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(4),
     wait=wait_exponential(multiplier=1, min=1, max=20),
     reraise=True,

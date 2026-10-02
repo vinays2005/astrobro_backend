@@ -275,17 +275,16 @@ class RuleEngine:
             return chart.planets[planet].house
 
         if field_type == "planet_dignity_score":
+            if "planet_as_lord_of_house" in cond:
+                house_num = cond["planet_as_lord_of_house"]
+                lord = chart.houses[house_num - 1].lord
+                if lord not in chart.planets:
+                    return None
+                return chart.planets[lord].dignity_score
             planet = cond.get("planet")
             if planet is None or planet not in chart.planets:
                 return None
             return chart.planets[planet].dignity_score
-
-        if field_type == "planet_dignity_score" and "planet_as_lord_of_house" in cond:
-            house_num = cond["planet_as_lord_of_house"]
-            lord = chart.houses[house_num - 1].lord
-            if lord not in chart.planets:
-                return None
-            return chart.planets[lord].dignity_score
 
         # houses.N.lord → which house is that lord in?
         if field_type.startswith("houses."):

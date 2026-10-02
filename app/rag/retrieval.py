@@ -63,6 +63,39 @@ class HybridRetriever:
         self._bm25: Any = None
         self._bm25_docs: list[dict[str, Any]] = []
 
+        # Warm up BM25 from all existing Qdrant points so retrieval works
+        # immediately after a server restart without waiting for a new ingest.
+        self._warmup_bm25()
+
+    def _warmup_bm25(self) -> None:
+        """Scroll all existing Qdrant points and build initial BM25 index."""
+        import logging
+        log = logging.getLogger(__name__)
+        try:
+            offset = None
+            while True:
+                points, offset = self._qdrant.scroll(
+                    collection_name=self._collection_name,
+                    limit=1000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in points:
+                    payload = point.payload or {}
+                    text = str(payload.get("text", ""))
+                    meta = {k: v for k, v in payload.items() if k != "text"}
+                    chunk_id = str(payload.get("chunk_id", ""))
+                    self._bm25_docs.append({"text": text, "metadata": meta, "id": chunk_id})
+                if offset is None:
+                    break
+            if self._bm25_docs:
+                from rank_bm25 import BM25Okapi
+                self._bm25 = BM25Okapi([self._tokenize(d["text"]) for d in self._bm25_docs])
+                log.info("bm25_warmup_done", docs=len(self._bm25_docs))
+        except Exception:
+            log.warning("bm25_warmup_failed — BM25 will activate after first ingest")
+
     # ── Indexing ──────────────────────────────────────────────
 
     def add_chunks(self, chunks: list[Any], batch_size: int = 64) -> None:
@@ -107,12 +140,14 @@ class HybridRetriever:
                     import time
                     time.sleep(2 ** attempt)
 
-        self._bm25_docs = [
+        # Append to existing docs (don't replace) so BM25 covers all ingested books
+        new_docs = [
             {"text": t, "metadata": m, "id": i}
             for t, m, i in zip(texts, metas, ids)
         ]
+        self._bm25_docs.extend(new_docs)
         from rank_bm25 import BM25Okapi
-        self._bm25 = BM25Okapi([self._tokenize(t) for t in texts])
+        self._bm25 = BM25Okapi([self._tokenize(d["text"]) for d in self._bm25_docs])
 
     # ── Retrieval ─────────────────────────────────────────────
 

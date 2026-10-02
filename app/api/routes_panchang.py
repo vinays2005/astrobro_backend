@@ -7,17 +7,18 @@ from __future__ import annotations
 
 from datetime import date as date_type
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.astrology.panchang import PanchangEngine, PanchangResult
 from app.config import get_settings
+from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/panchang", tags=["panchang"])
 _settings = get_settings()
 _engine = PanchangEngine(ayanamsa=_settings.ayanamsa)
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_api_key)])
 async def get_panchang(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     lat: float = Query(28.6139, description="Latitude (default: New Delhi)"),

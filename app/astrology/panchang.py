@@ -24,11 +24,14 @@ All calculations are deterministic. No LLM involvement.
 """
 from __future__ import annotations
 
+import threading
 import zoneinfo
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 
 import swisseph as swe
+
+_SWE_LOCK = threading.Lock()
 
 from app.astrology.constants import NAKSHATRAS, SIGNS
 
@@ -270,7 +273,8 @@ class PanchangEngine:
             "KRISHNAMURTI": swe.SIDM_KRISHNAMURTI,
             "RAMAN": swe.SIDM_RAMAN,
         }
-        swe.set_sid_mode(_AYANAMSA_MAP.get(ayanamsa, swe.SIDM_LAHIRI))
+        with _SWE_LOCK:
+            swe.set_sid_mode(_AYANAMSA_MAP.get(ayanamsa, swe.SIDM_LAHIRI))
 
     def calculate(
         self,

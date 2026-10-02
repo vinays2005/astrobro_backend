@@ -20,11 +20,16 @@ CRITICAL: This module only calculates. LLM never touches raw output directly.
 from __future__ import annotations
 
 import math
+import threading
 import zoneinfo
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import swisseph as swe
+
+# swe.set_sid_mode() mutates global state — guard against concurrent ayanamsa
+# switches from different requests that each create a fresh AstrologyEngine.
+_SWE_LOCK = threading.Lock()
 
 from app.astrology.constants import (
     COMBUSTION_ORBS,
@@ -262,7 +267,8 @@ class AstrologyEngine:
             "KRISHNAMURTI": swe.SIDM_KRISHNAMURTI,
             "RAMAN": swe.SIDM_RAMAN,
         }
-        swe.set_sid_mode(_AYANAMSA_MAP.get(ayanamsa, swe.SIDM_LAHIRI))
+        with _SWE_LOCK:
+            swe.set_sid_mode(_AYANAMSA_MAP.get(ayanamsa, swe.SIDM_LAHIRI))
 
     # ── Public API ────────────────────────────────────────────────────────────
 

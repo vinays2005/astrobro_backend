@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.agents.singleton import get_orchestrator
 from app.astrology.engine import AstrologyEngine
@@ -17,6 +17,7 @@ from app.models.api import (
     PredictionResponse,
 )
 from app.config import get_settings
+from app.security.auth import require_api_key
 
 router = APIRouter(prefix="/api/kundli", tags=["kundli"])
 _settings = get_settings()
@@ -38,7 +39,7 @@ def _navamsha_dict(div: dict) -> dict:
     return {pname: {"sign": pos.sign, "dignity": pos.dignity} for pname, pos in div.items()}
 
 
-@router.post("/create", response_model=KundliResponse)
+@router.post("/create", response_model=KundliResponse, dependencies=[Depends(require_api_key)])
 async def create_kundli(request: KundliRequest) -> KundliResponse:
     """Full natal chart with all extended calculations."""
     chart = _build_chart(request)
@@ -83,7 +84,7 @@ async def create_kundli(request: KundliRequest) -> KundliResponse:
     )
 
 
-@router.post("/match")
+@router.post("/match", dependencies=[Depends(require_api_key)])
 async def match_kundli(request: KundliMatchRequest) -> dict:
     """
     Ashtakoota Guna Milan (kundli matching).
@@ -122,7 +123,7 @@ async def match_kundli(request: KundliMatchRequest) -> dict:
     }
 
 
-@router.post("/predict", response_model=PredictionResponse)
+@router.post("/predict", response_model=PredictionResponse, dependencies=[Depends(require_api_key)])
 async def predict(request: PredictionRequest) -> dict:
     """Full AI prediction pipeline for a topic."""
     orchestrator = get_orchestrator()

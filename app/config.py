@@ -57,8 +57,8 @@ class Settings(BaseSettings):
 
     # LLM provider keys (read from env/Railway, never hardcoded)
     groq_api_key: str = ""
-    groq_model: str = "openai/gpt-oss-20b"
-    groq_classifier_model: str = "openai/gpt-oss-20b"
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_classifier_model: str = "llama-3.3-70b-versatile"
 
     # Razorpay
     razorpay_key_id: str = ""      # rzp_test_... or rzp_live_...
@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # Report generation
     # When True: paid PDF is granted without payment verification (dev/pre-launch mode)
     # Set to False once Razorpay keys are live and verified
-    auto_approve_payments: bool = True
+    auto_approve_payments: bool = False
     paid_report_price: int = 4900   # ₹49 in paise
 
     # Security

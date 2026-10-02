@@ -56,5 +56,5 @@ def wrap_evidence_list(chunks: list[dict[str, object]]) -> str:
     """Wrap a list of retrieved chunks for inclusion in a prompt."""
     if not chunks:
         return "<RETRIEVED_DATA>No relevant book evidence found.</RETRIEVED_DATA>"
-    parts = [wrap_as_data(str(c.get("text", "")), c) for c in chunks]
+    parts = [wrap_as_data(str(c.get("text", "")), c.get("metadata", c)) for c in chunks]
     return "\n\n".join(parts)

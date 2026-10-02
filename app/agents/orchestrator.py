@@ -219,7 +219,11 @@ class AgentOrchestrator:
             json_mode=True,
             max_tokens=1200,
         )
-        interpretation = self._parse_json_response(raw)
+        try:
+            interpretation = self._parse_json_response(raw)
+        except ValueError as exc:
+            state.errors.append(f"interpretation parse error: {exc}")
+            interpretation = {}
 
         verify_prompt = VERIFICATION_PROMPT.format(
             interpretation_json=json.dumps(interpretation, indent=2),
@@ -234,7 +238,11 @@ class AgentOrchestrator:
             json_mode=True,
             max_tokens=600,
         )
-        verification = self._parse_json_response(verify_raw)
+        try:
+            verification = self._parse_json_response(verify_raw)
+        except ValueError as exc:
+            state.errors.append(f"verification parse error: {exc}")
+            verification = {}
 
         if not verification.get("verified", True) and "corrected_interpretation" in verification:
             interpretation = verification["corrected_interpretation"]

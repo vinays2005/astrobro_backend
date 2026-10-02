@@ -79,6 +79,13 @@ def _ingest_in_background(tmp_path: str, book_meta: dict) -> None:
 
         retriever = _get_retriever()
         retriever.add_chunks(result.chunks)
+
+        # Keep orchestrator's retriever in sync so AI chat also sees new books
+        try:
+            from app.agents.singleton import get_orchestrator
+            get_orchestrator()._retriever.add_chunks(result.chunks)
+        except Exception:
+            pass
         log.info(
             "ingest_done",
             book=book_meta.get("book"),
@@ -110,7 +117,9 @@ async def ingest_book(
 
     topic_tags: comma-separated e.g. "marriage,career,planets"
     """
-    if file.content_type not in ("application/pdf", "application/octet-stream"):
+    if file.content_type not in (
+        "application/pdf", "application/octet-stream", "binary/octet-stream", "text/plain"
+    ):
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
 
     content = await file.read()
