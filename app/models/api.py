@@ -118,6 +118,7 @@ class KundliResponse(BaseModel):
     jaimini_karakas: dict = {}
     shadbala: dict = {}
     yogini_dasha: dict = {}
+    divisional_charts: dict = {}
 
 
 class PredictionFactor(BaseModel):

@@ -3,7 +3,7 @@ Deterministic Vedic astrology engine using Swiss Ephemeris (pyswisseph).
 
 Accuracy target: 95% — covers all major classical calculation systems:
   - 9 planets + Ascendant (Swiss Ephemeris, Lahiri/KP/Raman ayanamsa)
-  - D1 natal + D2/D3/D7/D9/D10/D12 divisional charts
+  - All 20 divisional charts D1–D60 (Varga system)
   - Vimshottari Dasha (Maha + Antar + Pratyantar)
   - Yogini Dasha
   - 50+ yogas (Pancha Mahapurusha, Raja, Dhana, Dosha-cancellation, etc.)
@@ -121,6 +121,7 @@ class Chart:
     jaimini_karakas: dict[str, str] = field(default_factory=dict)
     shadbala: dict[str, object] = field(default_factory=dict)
     yogini_dasha: dict[str, object] = field(default_factory=dict)
+    divisional_charts: dict[str, object] = field(default_factory=dict)
 
 
 # ── Ashtakavarga tables (B.V. Raman, "A Manual of Hindu Astrology") ──────────
@@ -288,6 +289,7 @@ class AstrologyEngine:
         jaimini = self._jaimini_karakas(planets)
         shadbala = self._shadbala(planets, asc["sign_index"])  # type: ignore[arg-type]
         yogini = self._yogini_dasha(planets["Moon"].longitude, dt)
+        all_vargas = self._all_divisional_charts(planets, asc["sign_index"])  # type: ignore[arg-type]
 
         return Chart(
             birth_datetime=dt, latitude=lat, longitude=lon, timezone=tz,
@@ -299,6 +301,7 @@ class AstrologyEngine:
             aspects=aspects, functional_nature=func_nature,
             ashtakavarga=ashtakavarga, jaimini_karakas=jaimini,
             shadbala=shadbala, yogini_dasha=yogini,
+            divisional_charts=all_vargas,
         )
 
     def calculate_transits(self, jd: float, natal_chart: Chart) -> dict[str, PlanetaryPosition]:
@@ -431,45 +434,138 @@ class AstrologyEngine:
 
     # ── Divisional charts ─────────────────────────────────────────────────────
 
+    # Navamsha triplicity start: Fire→Aries, Earth→Capricorn, Air→Libra, Water→Cancer
+    _D9_START  = {0:0,1:9,2:6,3:3, 4:0,5:9,6:6,7:3, 8:0,9:9,10:6,11:3}
+    # Dashamsha: odd signs start from own, even from 9th (8 ahead)
+    _D10_START = {i: i if i % 2 == 0 else (i + 8) % 12 for i in range(12)}
+
+    _VARGA_META: dict[int, tuple[str, str]] = {
+        1:  ("Rashi",            "Natal chart, overall life and personality"),
+        2:  ("Hora",             "Wealth, financial prosperity"),
+        3:  ("Drekkana",         "Siblings, courage, short journeys"),
+        4:  ("Chaturthamsha",    "Luck, property, fixed assets, home"),
+        5:  ("Panchamamsha",     "Power, authority, past karma"),
+        6:  ("Shashthamsha",     "Health, enemies, debts, diseases"),
+        7:  ("Saptamsha",        "Children, progeny, creative output"),
+        8:  ("Ashtamsha",        "Sudden events, obstacles, longevity"),
+        9:  ("Navamsha",         "Marriage, dharma, inner nature"),
+        10: ("Dashamsha",        "Career, profession, fame, status"),
+        11: ("Rudramsha",        "Gains, 11th house matters, death"),
+        12: ("Dwadashamsha",     "Parents, ancestors, heredity"),
+        16: ("Shodashamsha",     "Vehicles, comforts, happiness"),
+        20: ("Vimshamsha",       "Spiritual practices, upasana"),
+        24: ("Chaturvimshamsha", "Education, learning, academic success"),
+        27: ("Bhamsha",          "Strength, vitality, courage"),
+        30: ("Trimshamsha",      "Misfortunes, evils, health problems"),
+        36: ("Khavedamsha",      "Auspicious and inauspicious effects"),
+        40: ("Chatvarimsha",     "Maternal legacy, ancestral influences"),
+        45: ("Akshavedamsha",    "Paternal legacy, all-round effects"),
+        60: ("Shashtiamsha",     "Past karma, all karmic effects"),
+    }
+
     def _calculate_divisional(
         self, planets: dict[str, PlanetaryPosition], division: int, asc_sign_idx: int
     ) -> dict[str, NavamshaPosition]:
         """
-        D3  (Drekkana): sign + (drekkana_num * 4) mod 12
-        D7  (Saptamsha): odd signs → start from same; even → start 7 ahead
-        D9  (Navamsha): traditional triplicity-based start
-        D10 (Dashamsha): odd → own sign; even → 9th from own
-        D12 (Dwadashamsha): (sign + within) mod 12
+        Compute any Varga (D2–D60) for all planets.
+        sign_idx % 3: 0 = movable, 1 = fixed, 2 = dual
+        sign_idx % 2: 0 = odd Vedic sign, 1 = even Vedic sign
+        sign_idx % 4: 0 = fire, 1 = earth, 2 = air, 3 = water
         """
-        D9_START  = {0:0,1:9,2:6,3:3, 4:0,5:9,6:6,7:3, 8:0,9:9,10:6,11:3}
-        D10_START = {i: i if i % 2 == 0 else (i + 8) % 12 for i in range(12)}
-
         result: dict[str, NavamshaPosition] = {}
         for pname, ppos in planets.items():
             lon = ppos.longitude
             sign_idx = int(lon / 30) % 12
             deg = lon % 30
-            within = int(deg / (30.0 / division))  # 0-indexed slot
 
-            if division == 2:
-                # D2 (Hora): odd signs → Leo then Cancer; even → Cancer then Leo
-                if sign_idx % 2 == 0:
-                    div_sign = 4 if within == 0 else 3   # Leo, Cancer
-                else:
-                    div_sign = 3 if within == 0 else 4   # Cancer, Leo
-            elif division == 3:
-                div_sign = (sign_idx + within * 4) % 12
-            elif division == 7:
-                start = sign_idx if sign_idx % 2 == 0 else (sign_idx + 6) % 12
-                div_sign = (start + within) % 12
-            elif division == 9:
-                div_sign = (D9_START[sign_idx] + within) % 12
-            elif division == 10:
-                div_sign = (D10_START[sign_idx] + within) % 12
-            elif division == 12:
-                div_sign = (sign_idx + within) % 12
+            if division == 30:
+                # Trimshamsha has non-uniform divisions — special table
+                if sign_idx % 2 == 0:  # odd Vedic signs (Aries, Gemini, Leo…)
+                    if deg < 5:    div_sign = 0   # Mars → Aries
+                    elif deg < 10: div_sign = 10  # Saturn → Aquarius
+                    elif deg < 18: div_sign = 8   # Jupiter → Sagittarius
+                    elif deg < 25: div_sign = 2   # Mercury → Gemini
+                    else:          div_sign = 1   # Venus → Taurus
+                else:                              # even Vedic signs
+                    if deg < 5:    div_sign = 1   # Venus → Taurus
+                    elif deg < 12: div_sign = 5   # Mercury → Virgo
+                    elif deg < 20: div_sign = 11  # Jupiter → Pisces
+                    elif deg < 25: div_sign = 9   # Saturn → Capricorn
+                    else:          div_sign = 7   # Mars → Scorpio
             else:
-                div_sign = (sign_idx * division + within) % 12
+                within = int(deg * division / 30.0)
+
+                if division == 2:
+                    # D2 Hora: odd Vedic signs → Leo(4) first; even → Cancer(3) first
+                    div_sign = (4 if within == 0 else 3) if sign_idx % 2 == 0 else (3 if within == 0 else 4)
+                elif division == 3:
+                    # D3 Drekkana: sign + drekkana_num * 4
+                    div_sign = (sign_idx + within * 4) % 12
+                elif division == 4:
+                    # D4 Chaturthamsha: movable/fixed/dual → Aries/Leo/Sagittarius group starts
+                    start = (sign_idx + [0, 3, 6][sign_idx % 3]) % 12
+                    div_sign = (start + within * 3) % 12
+                elif division == 5:
+                    # D5 Panchamamsha: odd → Aries, even → Sagittarius
+                    start = 0 if sign_idx % 2 == 0 else 8
+                    div_sign = (start + within) % 12
+                elif division == 6:
+                    # D6 Shashthamsha: odd → Aries, even → Libra
+                    start = 0 if sign_idx % 2 == 0 else 6
+                    div_sign = (start + within) % 12
+                elif division == 7:
+                    # D7 Saptamsha: odd → own sign, even → 7th from own
+                    start = sign_idx if sign_idx % 2 == 0 else (sign_idx + 6) % 12
+                    div_sign = (start + within) % 12
+                elif division == 8:
+                    # D8 Ashtamsha: movable→Aries, fixed→Sagittarius, dual→Leo
+                    start = [0, 8, 4][sign_idx % 3]
+                    div_sign = (start + within) % 12
+                elif division == 9:
+                    div_sign = (self._D9_START[sign_idx] + within) % 12
+                elif division == 10:
+                    div_sign = (self._D10_START[sign_idx] + within) % 12
+                elif division == 11:
+                    # D11 Rudramsha: odd → own sign, even → 7th from own
+                    start = sign_idx if sign_idx % 2 == 0 else (sign_idx + 6) % 12
+                    div_sign = (start + within) % 12
+                elif division == 12:
+                    # D12 Dwadashamsha: progressive from own sign
+                    div_sign = (sign_idx + within) % 12
+                elif division == 16:
+                    # D16 Shodashamsha: movable→Aries, fixed→Leo, dual→Sagittarius
+                    start = [0, 4, 8][sign_idx % 3]
+                    div_sign = (start + within) % 12
+                elif division == 20:
+                    # D20 Vimshamsha: movable→Aries, fixed→Sagittarius, dual→Leo
+                    start = [0, 8, 4][sign_idx % 3]
+                    div_sign = (start + within) % 12
+                elif division == 24:
+                    # D24 Chaturvimshamsha: odd→Leo, even→Cancer
+                    start = 4 if sign_idx % 2 == 0 else 3
+                    div_sign = (start + within) % 12
+                elif division == 27:
+                    # D27 Bhamsha: fire→Aries, earth→Cancer, air→Libra, water→Capricorn
+                    start = [0, 3, 6, 9][sign_idx % 4]
+                    div_sign = (start + within) % 12
+                elif division == 36:
+                    # D36 Khavedamsha: movable→Aries, fixed→Sagittarius, dual→Leo
+                    start = [0, 8, 4][sign_idx % 3]
+                    div_sign = (start + within) % 12
+                elif division == 40:
+                    # D40 Chatvarimsha: odd→Aries, even→Libra
+                    start = 0 if sign_idx % 2 == 0 else 6
+                    div_sign = (start + within) % 12
+                elif division == 45:
+                    # D45 Akshavedamsha: movable→Aries, fixed→Leo, dual→Sagittarius
+                    start = [0, 4, 8][sign_idx % 3]
+                    div_sign = (start + within) % 12
+                elif division == 60:
+                    # D60 Shashtiamsha: odd→Aries, even→Libra
+                    start = 0 if sign_idx % 2 == 0 else 6
+                    div_sign = (start + within) % 12
+                else:
+                    div_sign = (sign_idx * division + within) % 12
 
             dignity, _ = self._dignity(pname, div_sign, div_sign * 30.0)
             result[pname] = NavamshaPosition(
@@ -477,6 +573,34 @@ class AstrologyEngine:
                 sign_index=div_sign, dignity=dignity,
             )
         return result
+
+    _ALL_VARGAS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 20, 24, 27, 30, 36, 40, 45, 60]
+
+    def _all_divisional_charts(
+        self, planets: dict[str, PlanetaryPosition], asc_sign_idx: int
+    ) -> dict[str, object]:
+        """Compute all D1–D60 vargas and return as a JSON-ready dict."""
+        charts: dict[str, object] = {}
+        # D1 is the natal chart itself
+        name, signif = self._VARGA_META[1]
+        charts["D1"] = {
+            "name": name, "signification": signif,
+            "positions": {
+                p: {"sign": pos.sign, "dignity": pos.dignity}
+                for p, pos in planets.items()
+            },
+        }
+        for div in self._ALL_VARGAS[1:]:
+            div_result = self._calculate_divisional(planets, div, asc_sign_idx)
+            name, signif = self._VARGA_META[div]
+            charts[f"D{div}"] = {
+                "name": name, "signification": signif,
+                "positions": {
+                    p: {"sign": pos.sign, "dignity": pos.dignity}
+                    for p, pos in div_result.items()
+                },
+            }
+        return charts
 
     # ── Dasha systems ─────────────────────────────────────────────────────────
 

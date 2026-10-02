@@ -79,6 +79,7 @@ async def create_kundli(request: KundliRequest) -> KundliResponse:
         jaimini_karakas=chart.jaimini_karakas,
         shadbala=chart.shadbala,
         yogini_dasha=chart.yogini_dasha,
+        divisional_charts=chart.divisional_charts,
     )
 
 
