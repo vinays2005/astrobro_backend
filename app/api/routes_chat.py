@@ -29,35 +29,30 @@ async def chat(request: ChatRequest) -> dict:
 @router.post("/stream", dependencies=[Depends(require_api_key)])
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """
-    Streaming AI astrology chat — sends chunks as Server-Sent Events.
-    Flutter uses http streaming to receive tokens in real-time.
+    Streaming AI astrology chat — true SSE token stream from Groq.
+
+    Tokens arrive at the client within ~1s (RAG lookup + first LLM token),
+    instead of the old approach that ran the full 2-minute pipeline first
+    and only then fake-streamed words — causing 499 client timeouts.
     """
     orchestrator = get_orchestrator()
 
     async def event_generator():
-        # Send start event
-        yield f"data: {json.dumps({'type': 'start', 'request_id': 'pending'})}\n\n"
+        import uuid as _uuid
+        request_id = str(_uuid.uuid4())
+        yield f"data: {json.dumps({'type': 'start', 'request_id': request_id})}\n\n"
 
         try:
-            # Full pipeline first to get chart + context
-            result = await orchestrator.run(
+            full_text = ""
+            async for token in orchestrator.run_chat_stream(
                 user_input=request.question,
                 birth_data=request.birth_data.model_dump() if request.birth_data else None,
                 conversation_history=request.conversation_history,
-                force_chat=True,
-            )
-            answer = result.get("answer", "")
-            # Stream answer token by token (word level)
-            words = answer.split()
-            buffer = ""
-            for i, word in enumerate(words):
-                buffer += word + " "
-                if i % 3 == 2 or i == len(words) - 1:
-                    yield f"data: {json.dumps({'type': 'token', 'content': buffer})}\n\n"
-                    buffer = ""
+            ):
+                full_text += token
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
-            # Send complete event with full result
-            yield f"data: {json.dumps({'type': 'done', 'full': result})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'answer': full_text, 'request_id': request_id})}\n\n"
 
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"

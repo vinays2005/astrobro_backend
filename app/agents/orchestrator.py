@@ -320,6 +320,64 @@ class AgentOrchestrator:
             "disclaimer": "Vedic astrology guidance. Consult a professional for major decisions.",
         })
 
+    async def run_chat_stream(
+        self,
+        user_input: str,
+        birth_data: dict | None = None,
+        conversation_history: list[dict] | None = None,
+    ):
+        """
+        Streaming chat pipeline — yields raw LLM tokens as they arrive.
+
+        Unlike run() + fake word-splitting, this uses Groq's streaming API
+        so the first token reaches the client in ~1s instead of ~2 minutes.
+        Cannot use json_mode=True (Groq streaming doesn't support it), so
+        the response is plain text; callers assemble it into `answer`.
+        """
+        chart_dict: dict = {}
+        dasha: dict = {}
+        if birth_data:
+            try:
+                chart = self._engine.calculate_chart(
+                    dt=self._parse_birth_datetime(birth_data),
+                    lat=float(birth_data["latitude"]),
+                    lon=float(birth_data["longitude"]),
+                    tz=birth_data.get("timezone", "Asia/Kolkata"),
+                )
+                chart_dict = self._chart_to_dict(chart)
+                dasha = chart.current_dasha
+            except Exception:
+                pass
+
+        try:
+            evidence_chunks = await self._retriever.retrieve(
+                query=user_input, top_k=6, rerank_top_k=3
+            )
+            evidence_list = [{"text": c.text, "metadata": c.metadata} for c in evidence_chunks]
+        except Exception:
+            evidence_list = []
+
+        chart_json = json.dumps(chart_dict, indent=2, default=str)
+        dasha_json = json.dumps(dasha, indent=2, default=str)
+        evidence_wrapped = wrap_evidence_list(evidence_list)
+        history = (conversation_history or [])[-4:]
+
+        prompt = CHAT_PROMPT.format(
+            chart_json=chart_json,
+            dasha_json=dasha_json,
+            evidence_json=evidence_wrapped,
+            history_json=json.dumps(history, indent=2),
+            question=user_input,
+        )
+
+        async for token in self._llm.generate_stream(
+            prompt,
+            system=SYSTEM_ASTROLOGER,
+            temperature=0.4,
+            max_tokens=900,
+        ):
+            yield token
+
     # ── Routing helpers ───────────────────────────────────────
 
     def _classify_topic(self, text: str) -> str:

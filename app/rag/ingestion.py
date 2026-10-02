@@ -184,3 +184,89 @@ class PDFIngestor:
     def _chunk_id(self, text: str, meta: dict[str, object], index: int = 0) -> str:
         key = f"{meta.get('book','')}:{meta.get('page','')}:{index}:{text[:100]}"
         return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+class TxtIngestor:
+    """
+    Ingest a plain-text file (pre-extracted TXT) into Chunk objects.
+
+    Skips PDF/OCR entirely — assumes text is already clean (e.g. from
+    Internet Archive djvu.txt exports). Reuses the same chunking logic
+    as PDFIngestor so chunk sizes stay consistent across the collection.
+    """
+
+    def __init__(
+        self,
+        chunk_size: int = 800,
+        chunk_overlap: int = 150,
+        min_chunk_size: int = 100,
+    ) -> None:
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.min_chunk_size = min_chunk_size
+
+    def ingest(
+        self,
+        txt_path: str | Path,
+        book_meta: dict[str, object],
+    ) -> IngestionResult:
+        path = Path(txt_path)
+        if not path.exists():
+            raise FileNotFoundError(f"TXT not found: {path}")
+
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        cleaned = self._clean_text(raw)
+
+        all_chunks: list[Chunk] = []
+        for chunk_text in self._chunk_text(cleaned):
+            if len(chunk_text) < self.min_chunk_size:
+                continue
+            meta = {**book_meta, "source_file": path.name}
+            all_chunks.append(Chunk(
+                text=chunk_text,
+                metadata=meta,
+                chunk_id=self._chunk_id(chunk_text, meta, len(all_chunks)),
+            ))
+
+        return IngestionResult(
+            chunks=all_chunks,
+            errors=[],
+            pages_processed=1,
+            pages_skipped=0,
+        )
+
+    def _clean_text(self, text: str) -> str:
+        text = re.sub(r"\n\s*\d+\s*\n", "\n", text)   # standalone page numbers
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def _chunk_text(self, text: str) -> list[str]:
+        paragraphs = re.split(r"\n\s*\n", text)
+        chunks: list[str] = []
+        current = ""
+        for para in paragraphs:
+            if len(current) + len(para) + 2 <= self.chunk_size:
+                current = (current + "\n\n" + para).lstrip()
+            else:
+                if current:
+                    chunks.append(current.strip())
+                overlap = chunks[-1][-self.chunk_overlap:] if chunks and self.chunk_overlap > 0 else ""
+                current = (overlap + "\n\n" + para).lstrip() if overlap else para
+                if len(current) > self.chunk_size * 1.5:
+                    sentences = re.split(r"(?<=[.!?])\s+", current)
+                    current = ""
+                    for sent in sentences:
+                        if len(current) + len(sent) + 1 <= self.chunk_size:
+                            current = (current + " " + sent).strip()
+                        else:
+                            if current:
+                                chunks.append(current.strip())
+                            current = sent
+        if current.strip():
+            chunks.append(current.strip())
+        return chunks
+
+    def _chunk_id(self, text: str, meta: dict[str, object], index: int = 0) -> str:
+        key = f"{meta.get('book','')}:txt:{index}:{text[:100]}"
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
