@@ -2,8 +2,6 @@
 Real Vedic Panchang API endpoint.
 
 GET /api/panchang?date=YYYY-MM-DD&lat=&lon=&tz=
-Returns all five limbs (Tithi, Vara, Nakshatra, Yoga, Karana) plus
-Rahu Kaal, Yamagandam, Gulika, Choghadiya, Abhijit Muhurat, sunrise/sunset.
 """
 from __future__ import annotations
 
@@ -26,12 +24,6 @@ async def get_panchang(
     lon: float = Query(77.2090, description="Longitude"),
     tz: str = Query("Asia/Kolkata", description="Timezone (e.g. Asia/Kolkata)"),
 ) -> dict:
-    """
-    Real Vedic Panchang for a given date and location.
-
-    All calculations use Swiss Ephemeris with Lahiri ayanamsa.
-    Sunrise/sunset are location-specific via swe.rise_trans().
-    """
     try:
         target = date_type.fromisoformat(date)
     except ValueError:
@@ -49,12 +41,17 @@ def _to_dict(p: PanchangResult) -> dict:
     return {
         "date": p.date,
         "vara": p.vara,
+        "vara_lord": p.vara_lord,
+        "sun_rashi": p.sun_rashi,
+        "moon_rashi": p.moon_rashi,
         "tithi": {
             "number": p.tithi.number,
             "name": p.tithi.name,
             "paksha": p.tithi.paksha,
             "end_time": p.tithi.end_time,
             "display": f"{p.tithi.paksha} {p.tithi.name}",
+            "deity": p.tithi.deity,
+            "nature": p.tithi.nature,
         },
         "nakshatra": {
             "index": p.nakshatra.index,
@@ -62,35 +59,57 @@ def _to_dict(p: PanchangResult) -> dict:
             "lord": p.nakshatra.lord,
             "pada": p.nakshatra.pada,
             "end_time": p.nakshatra.end_time,
+            "deity": p.nakshatra.deity,
+            "gana": p.nakshatra.gana,
         },
         "yoga": {
             "index": p.yoga.index,
             "name": p.yoga.name,
             "end_time": p.yoga.end_time,
             "auspicious": p.yoga.auspicious,
+            "description": p.yoga.description,
         },
         "karana": {
             "name": p.karana.name,
             "end_time": p.karana.end_time,
+            "auspicious": p.karana.auspicious,
         },
         "sun_moon": {
             "sunrise": p.sun_moon.sunrise,
             "sunset": p.sun_moon.sunset,
             "moonrise": p.sun_moon.moonrise,
             "moonset": p.sun_moon.moonset,
-            "day_duration_hours": round(p.sun_moon.day_duration_hours, 2),
+            "day_duration_hours": p.sun_moon.day_duration_hours,
         },
         "inauspicious": {
             "rahu_kaal": p.rahu_kaal,
             "yamagandam": p.yamagandam,
             "gulika": p.gulika,
+            "disha_shool": p.disha_shool,
         },
         "muhurat": {
+            "brahma_muhurat": p.brahma_muhurat,
             "abhijit": p.abhijit_muhurat,
+            "amrit_kaal": p.amrit_kaal,
         },
         "choghadiya": [
-            {"name": m.name, "start": m.start, "end": m.end, "quality": m.quality}
+            {
+                "name": m.name,
+                "start": m.start,
+                "end": m.end,
+                "quality": m.quality,
+                "is_night": m.is_night,
+            }
             for m in p.choghadiya
+        ],
+        "hora": [
+            {
+                "planet": h.planet,
+                "start": h.start,
+                "end": h.end,
+                "is_night": h.is_night,
+            }
+            for h in p.hora
         ],
         "calendar": {
             "vikram_samvat": p.vikram_samvat,
