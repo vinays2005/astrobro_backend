@@ -62,16 +62,19 @@ class HybridRetriever:
 
         self._bm25: Any = None
         self._bm25_docs: list[dict[str, Any]] = []
+        self._bm25_lock = __import__("threading").Lock()
 
-        # Warm up BM25 from all existing Qdrant points so retrieval works
-        # immediately after a server restart without waiting for a new ingest.
-        self._warmup_bm25()
+        # Warm up BM25 in a background thread — scrolling 120k+ Qdrant points
+        # synchronously would block startup and fail Railway's health check.
+        import threading
+        threading.Thread(target=self._warmup_bm25, daemon=True).start()
 
     def _warmup_bm25(self) -> None:
-        """Scroll all existing Qdrant points and build initial BM25 index."""
+        """Scroll all existing Qdrant points and build initial BM25 index (background thread)."""
         import logging
         log = logging.getLogger(__name__)
         try:
+            docs: list[dict[str, Any]] = []
             offset = None
             while True:
                 points, offset = self._qdrant.scroll(
@@ -86,13 +89,16 @@ class HybridRetriever:
                     text = str(payload.get("text", ""))
                     meta = {k: v for k, v in payload.items() if k != "text"}
                     chunk_id = str(payload.get("chunk_id", ""))
-                    self._bm25_docs.append({"text": text, "metadata": meta, "id": chunk_id})
+                    docs.append({"text": text, "metadata": meta, "id": chunk_id})
                 if offset is None:
                     break
-            if self._bm25_docs:
+            if docs:
                 from rank_bm25 import BM25Okapi
-                self._bm25 = BM25Okapi([self._tokenize(d["text"]) for d in self._bm25_docs])
-                log.info("bm25_warmup_done", docs=len(self._bm25_docs))
+                bm25 = BM25Okapi([self._tokenize(d["text"]) for d in docs])
+                with self._bm25_lock:
+                    self._bm25_docs = docs
+                    self._bm25 = bm25
+                log.info("bm25_warmup_done", docs=len(docs))
         except Exception:
             log.warning("bm25_warmup_failed — BM25 will activate after first ingest")
 
@@ -145,9 +151,10 @@ class HybridRetriever:
             {"text": t, "metadata": m, "id": i}
             for t, m, i in zip(texts, metas, ids)
         ]
-        self._bm25_docs.extend(new_docs)
         from rank_bm25 import BM25Okapi
-        self._bm25 = BM25Okapi([self._tokenize(d["text"]) for d in self._bm25_docs])
+        with self._bm25_lock:
+            self._bm25_docs.extend(new_docs)
+            self._bm25 = BM25Okapi([self._tokenize(d["text"]) for d in self._bm25_docs])
 
     # ── Retrieval ─────────────────────────────────────────────
 
