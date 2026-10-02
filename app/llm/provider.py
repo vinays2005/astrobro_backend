@@ -130,7 +130,6 @@ class GroqProvider(LLMProvider):
         )
         return response.choices[0].message.content or ""
 
-    @_retry_policy
     async def generate_stream(
         self,
         prompt: str,
@@ -138,6 +137,8 @@ class GroqProvider(LLMProvider):
         temperature: float = 0.3,
         max_tokens: int = 2048,
     ) -> AsyncIterator[str]:
+        # No retry decorator — tenacity cannot wrap async generators.
+        # Errors during streaming propagate naturally to the caller.
         stream = await self._client.chat.completions.create(
             model=self._llm_model,
             messages=self._build_messages(prompt, system),

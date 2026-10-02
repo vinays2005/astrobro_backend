@@ -27,6 +27,18 @@ _MAX_PDF_MB = 200  # raised from 50 — large classical texts can be 120MB+
 
 log = logging.getLogger(__name__)
 
+# In-memory cache for the books list — scrolling 53k+ chunks on every request
+# takes 5+ minutes. Cache for 5 minutes; invalidated automatically on new ingestion.
+_books_cache: dict | None = None
+_books_cache_at: float = 0.0
+_BOOKS_CACHE_TTL = 300.0  # seconds
+
+
+def _invalidate_books_cache() -> None:
+    global _books_cache, _books_cache_at
+    _books_cache = None
+    _books_cache_at = 0.0
+
 # ── Singleton retriever — reuses loaded SentenceTransformer across requests ──
 _retriever_lock = threading.Lock()
 _retriever: HybridRetriever | None = None
@@ -50,6 +62,7 @@ def _get_retriever() -> HybridRetriever:
 
 def _ingest_in_background(tmp_path: str, book_meta: dict) -> None:
     """Run in BackgroundTask — called after HTTP 202 is already sent."""
+    _invalidate_books_cache()
     try:
         log.info("ingest_start", book=book_meta.get("book"), path=tmp_path)
         ingestor = PDFIngestor(chunk_size=800, chunk_overlap=150)
@@ -131,9 +144,16 @@ async def ingest_book(
 @router.get("/list")
 async def list_books() -> dict:
     """List all books currently indexed in the vector store."""
+    import time
+    global _books_cache, _books_cache_at
+
+    now = time.monotonic()
+    if _books_cache is not None and (now - _books_cache_at) < _BOOKS_CACHE_TTL:
+        return _books_cache
+
     try:
         from qdrant_client import QdrantClient
-        client = QdrantClient(url=_settings.qdrant_url, api_key=_settings.qdrant_api_key or None)
+        client = QdrantClient(url=_settings.qdrant_url, api_key=_settings.qdrant_api_key or None, timeout=30)
 
         if not client.collection_exists(_settings.books_collection):
             return {"total_chunks": 0, "books": []}
@@ -146,7 +166,7 @@ async def list_books() -> dict:
         while True:
             points, offset = client.scroll(
                 collection_name=_settings.books_collection,
-                limit=500,
+                limit=1000,
                 offset=offset,
                 with_payload=["book"],
                 with_vectors=False,
@@ -157,9 +177,12 @@ async def list_books() -> dict:
             if offset is None:
                 break
 
-        return {
+        result = {
             "total_chunks": total,
             "books": [{"title": t, "chunks": c} for t, c in sorted(books.items())],
         }
+        _books_cache = result
+        _books_cache_at = now
+        return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Vector DB error: {exc}") from exc
