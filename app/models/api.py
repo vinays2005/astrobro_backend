@@ -92,6 +92,12 @@ class DashaInfo(BaseModel):
     end: str | None
 
 
+class KundliMatchRequest(BaseModel):
+    person1: BirthData
+    person2: BirthData
+    ayanamsa: str = Field(default="LAHIRI")
+
+
 class KundliResponse(BaseModel):
     name: str
     ascendant: dict
@@ -100,6 +106,18 @@ class KundliResponse(BaseModel):
     nakshatra_moon: dict
     yogas: list[dict]
     current_dasha: dict
+    doshas: dict = {}
+    navamsha: dict = {}
+    d3: dict = {}
+    d7: dict = {}
+    d10: dict = {}
+    d12: dict = {}
+    aspects: dict = {}
+    functional_nature: dict = {}
+    ashtakavarga: dict = {}
+    jaimini_karakas: dict = {}
+    shadbala: dict = {}
+    yogini_dasha: dict = {}
 
 
 class PredictionFactor(BaseModel):
