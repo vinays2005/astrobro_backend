@@ -79,12 +79,12 @@ class AgentOrchestrator:
             ),
         )
         self._retriever = retriever or HybridRetriever(
-            embedding_model=_s.embedding_model,
+            embedding_model=f"sentence-transformers/{_s.embedding_model}" if "/" not in _s.embedding_model else _s.embedding_model,
             qdrant_url=_s.qdrant_url,
             qdrant_api_key=_s.qdrant_api_key,
             collection_name=_s.books_collection,
             embedding_dimension=_s.embedding_dimension,
-            reranker_enabled=_s.reranker_enabled,
+            reranker_enabled=False,
         )
         self._rules = rules or RuleEngine()
 

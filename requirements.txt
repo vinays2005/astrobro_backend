@@ -9,21 +9,16 @@ python-multipart==0.0.20
 pyswisseph==2.10.3.2
 
 # LLM
-ollama==0.4.5
 groq==0.13.1
 
-# RAG
+# RAG — fastembed uses ONNX (not PyTorch), ~80 MB RAM vs 400 MB for sentence-transformers
+fastembed==0.4.1
 qdrant-client==1.12.1
 rank-bm25==0.2.2
-sentence-transformers==3.3.1
-pymupdf==1.25.1
-pytesseract==0.3.13
-Pillow==11.0.0
 
 # Database
 SQLAlchemy==2.0.36
 aiosqlite==0.20.0
-asyncpg==0.30.0
 
 # Payments
 razorpay==1.4.2
@@ -41,11 +36,3 @@ structlog==24.4.0
 httpx==0.27.2
 tenacity==9.0.0
 python-dotenv==1.0.1
-
-# Dev/Quality
-ruff==0.9.0
-mypy==1.14.0
-
-# Testing
-pytest==8.3.4
-pytest-asyncio==0.25.0

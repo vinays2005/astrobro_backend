@@ -27,24 +27,23 @@ class HybridRetriever:
 
     def __init__(
         self,
-        embedding_model: str = "all-MiniLM-L6-v2",
-        reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2",
+        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        reranker_model: str = "",
         qdrant_url: str = "",
         qdrant_api_key: str = "",
         collection_name: str = "vedic_books",
         embedding_dimension: int = 384,
-        reranker_enabled: bool = True,
+        reranker_enabled: bool = False,
     ) -> None:
-        from sentence_transformers import SentenceTransformer
+        # fastembed uses ONNX Runtime (~80 MB) instead of PyTorch (~400 MB).
+        # Drop-in replacement for SentenceTransformer for vector search.
+        from fastembed import TextEmbedding
         from qdrant_client import QdrantClient
         from qdrant_client.models import Distance, VectorParams
 
-        self._embedder = SentenceTransformer(embedding_model)
-        self._reranker_enabled = reranker_enabled
+        self._embedder = TextEmbedding(embedding_model)
+        self._reranker_enabled = False  # CrossEncoder removed — used PyTorch
         self._reranker = None
-        if reranker_enabled:
-            from sentence_transformers import CrossEncoder
-            self._reranker = CrossEncoder(reranker_model)
 
         self._collection_name = collection_name
         self._qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key or None,timeout=120,)
@@ -116,7 +115,7 @@ class HybridRetriever:
             bt = texts[i:i + batch_size]
             bm = metas[i:i + batch_size]
             bi = ids[i:i + batch_size]
-            embeddings = self._embedder.encode(bt, normalize_embeddings=True).tolist()
+            embeddings = [emb.tolist() for emb in self._embedder.embed(bt)]
 
             # Qdrant point IDs must be unsigned int or UUID — our chunk_ids
             # are hex strings (sha256[:16]), so use them as a UUID5 seed to
@@ -173,11 +172,11 @@ class HybridRetriever:
         import asyncio
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        # CPU-bound: SentenceTransformer inference blocks the GIL — run in thread
+        # ONNX inference is fast; run in thread to keep event loop free
         raw_emb = await asyncio.to_thread(
-            self._embedder.encode, [query], normalize_embeddings=True
+            lambda: list(self._embedder.embed([query]))[0]
         )
-        query_emb = raw_emb.tolist()[0]
+        query_emb = raw_emb.tolist()
 
         qfilter = None
         if metadata_filter:
@@ -224,15 +223,6 @@ class HybridRetriever:
                     ))
 
         merged = self._rrf_merge(vector_chunks, bm25_chunks)
-
-        if self._reranker_enabled and self._reranker is not None and merged:
-            pairs = [(query, c.text) for c in merged[:top_k]]
-            # CPU-bound: CrossEncoder inference — run in thread
-            rerank_scores = await asyncio.to_thread(self._reranker.predict, pairs)
-            for chunk, score in zip(merged[:top_k], rerank_scores):
-                chunk.score = float(score)
-                chunk.source = "reranked"
-            merged.sort(key=lambda c: c.score, reverse=True)
 
         return merged[:rerank_top_k]
 

@@ -3,11 +3,10 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# System deps for pyswisseph + pytesseract
+# System deps for pyswisseph (gcc/g++ needed to compile C extension)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
-    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -15,13 +14,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download ML models into the image so startup is instant.
-# Without this, Railway's health check times out while models download (3-5 min).
+# Pre-download the ONNX embedding model so Railway startup is instant.
+# fastembed caches the model in ~/.cache/fastembed on first embed() call.
 RUN python -c "\
-from sentence_transformers import SentenceTransformer, CrossEncoder; \
-SentenceTransformer('all-MiniLM-L6-v2'); \
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2'); \
-print('models cached')"
+from fastembed import TextEmbedding; \
+list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); \
+print('fastembed model cached')"
 
 COPY . .
 

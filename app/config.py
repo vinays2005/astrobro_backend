@@ -36,9 +36,9 @@ class Settings(BaseSettings):
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_dimension: int = 384
 
-    # Reranker
-    reranker_enabled: bool = True
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    # Reranker (CrossEncoder removed — used PyTorch which OOM-killed Railway)
+    reranker_enabled: bool = False
+    reranker_model: str = ""
     reranker_top_k: int = 5
 
     # Vector DB
