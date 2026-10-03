@@ -63,11 +63,10 @@ class HybridRetriever:
         self._bm25: Any = None
         self._bm25_docs: list[dict[str, Any]] = []
         self._bm25_lock = __import__("threading").Lock()
-
-        # Warm up BM25 in a background thread — scrolling 120k+ Qdrant points
-        # synchronously would block startup and fail Railway's health check.
-        import threading
-        threading.Thread(target=self._warmup_bm25, daemon=True).start()
+        # BM25 warmup intentionally removed — scrolling 120k+ Qdrant docs at
+        # startup pushes Railway's container past its memory limit (OOM kill).
+        # Vector-only retrieval is used until books are re-ingested, at which
+        # point add_chunks() rebuilds the BM25 index in-process.
 
     def _warmup_bm25(self) -> None:
         """Scroll all existing Qdrant points and build initial BM25 index (background thread)."""
