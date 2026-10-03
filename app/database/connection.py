@@ -1,6 +1,7 @@
 """Async SQLAlchemy database connection and session factory."""
 from __future__ import annotations
 
+import logging
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -8,13 +9,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import get_settings
 from app.database.models import Base
 
+_log = logging.getLogger(__name__)
 _settings = get_settings()
 
-# Engine — SQLite for dev, swap DATABASE_URL for PostgreSQL in prod
+# Resolve the database URL — fall back to SQLite if asyncpg is missing.
+# Railway's build cache occasionally serves a stale image without asyncpg;
+# this keeps the app running so all non-DB routes (kundli, panchang, chat)
+# continue working until the cache is cleared and the image is rebuilt.
+_db_url = _settings.database_url
+
+if "postgresql" in _db_url or "asyncpg" in _db_url:
+    try:
+        import asyncpg  # noqa: F401
+    except ImportError:
+        _log.warning(
+            "asyncpg not installed — falling back to SQLite. "
+            "Fix: clear Railway build cache or set DATABASE_URL=sqlite+aiosqlite:///./data/astrobro.db"
+        )
+        _db_url = "sqlite+aiosqlite:///./data/astrobro.db"
+
 engine = create_async_engine(
-    _settings.database_url,
+    _db_url,
     echo=_settings.debug,
-    connect_args={"check_same_thread": False} if "sqlite" in _settings.database_url else {},
+    connect_args={"check_same_thread": False} if "sqlite" in _db_url else {},
 )
 
 AsyncSessionLocal = async_sessionmaker(
