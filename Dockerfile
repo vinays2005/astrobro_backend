@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# CACHEBUST=3 — increment this to force Railway to re-run pip install
+ARG CACHEBUST=3
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
