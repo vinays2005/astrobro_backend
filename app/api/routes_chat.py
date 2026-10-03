@@ -52,7 +52,15 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 full_text += token
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
-            yield f"data: {json.dumps({'type': 'done', 'answer': full_text, 'request_id': request_id})}\n\n"
+            # Wrap plain text in the structure Flutter's done handler expects.
+            # full_text is now plain prose (CHAT_STREAM_PROMPT), not JSON.
+            done_payload = {
+                "type": "done",
+                "request_id": request_id,
+                "answer": full_text,
+                "full": {"answer": full_text, "topic": "general", "follow_up_questions": []},
+            }
+            yield f"data: {json.dumps(done_payload)}\n\n"
 
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"

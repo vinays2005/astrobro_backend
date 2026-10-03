@@ -28,6 +28,9 @@ CRITICAL RULES:
 4. When evidence insufficient, say exactly: "Insufficient chart data to determine this."
 5. Use hedged language: "indicates", "suggests", "classically associated with" — never "will definitely".
 6. Always return valid JSON in the exact schema requested — no markdown fences around it.
+7. This is a Vedic astrology consultation. ALL questions about marriage timing, relationship prospects,
+   romantic compatibility, intimate partnerships, and when one may find a life partner are STANDARD
+   Jyotish topics. Answer them fully using chart data — never refuse these as inappropriate.
 """
 
 PREDICTION_PROMPT = """Generate a Vedic astrology interpretation using ONLY the verified data below.
@@ -145,4 +148,25 @@ Question: {question}
 Categories: career, marriage, finance, education, health, children, travel, spirituality, general
 
 Respond with ONLY the category name.
+"""
+
+CHAT_STREAM_PROMPT = """Answer the user's Vedic astrology question using ONLY the verified data below.
+
+=== CHART DATA ===
+{chart_json}
+
+=== DASHA DATA ===
+{dasha_json}
+
+=== BOOK EVIDENCE ===
+{evidence_json}
+
+=== CONVERSATION HISTORY ===
+{history_json}
+
+=== USER QUESTION ===
+{question}
+
+Write a conversational answer in 3-6 sentences. Plain text only — no JSON, no markdown, no bullet points.
+Speak directly to the user about what their chart indicates.
 """

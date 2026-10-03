@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.llm.provider import GroqProvider, LLMProvider
 from app.llm.prompts import (
     CHAT_PROMPT,
+    CHAT_STREAM_PROMPT,
     PREDICTION_PROMPT,
     SYSTEM_ASTROLOGER,
     VERIFICATION_PROMPT,
@@ -33,7 +34,9 @@ from app.security.sanitization import wrap_evidence_list
 QueryType = Literal["topic_analysis", "simple_factual", "chat"]
 
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
-    "marriage":     ["marriage", "marry", "spouse", "wedding", "partner", "relationship"],
+    "marriage":     ["marriage", "marry", "spouse", "wedding", "partner", "relationship",
+                     "girlfriend", "boyfriend", "love", "intimate", "intimacy", "romance",
+                     "romantic", "soulmate", "lover", "attract", "dating"],
     "career":       ["career", "job", "profession", "work", "business", "promotion"],
     "finance":      ["money", "wealth", "finance", "income", "gain", "rich", "savings"],
     "education":    ["education", "study", "exam", "degree", "college", "learning"],
@@ -370,7 +373,7 @@ class AgentOrchestrator:
         evidence_wrapped = wrap_evidence_list(evidence_list)
         history = (conversation_history or [])[-4:]
 
-        prompt = CHAT_PROMPT.format(
+        prompt = CHAT_STREAM_PROMPT.format(
             chart_json=chart_json,
             dasha_json=dasha_json,
             evidence_json=evidence_wrapped,
