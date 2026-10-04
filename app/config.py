@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ollama_keep_alive: str = "5m"
 
     # Embeddings
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dimension: int = 384
 
     # Reranker (CrossEncoder removed — used PyTorch which OOM-killed Railway)
