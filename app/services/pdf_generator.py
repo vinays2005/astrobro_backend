@@ -15,6 +15,13 @@ _GREY    = (120, 113, 108)  # muted
 _LIGHT   = (245, 241, 235)  # bg row tint
 _WHITE   = (255, 255, 255)
 
+# Core Helvetica is Latin-1 only; map common LLM/UI punctuation to safe equivalents.
+_TEXT_MAP = str.maketrans({
+    "—": "-", "–": "-", "‘": "'", "’": "'",
+    "“": '"', "”": '"', "…": "...", "•": "-",
+    "→": "->", "₹": "Rs.", "ॐ": "Om", " ": " ",
+})
+
 # ── FPDF subclass ─────────────────────────────────────────────────────────────
 
 class _AstroBroPDF(FPDF):
@@ -24,6 +31,10 @@ class _AstroBroPDF(FPDF):
         self._tier = tier
         self.set_auto_page_break(auto=True, margin=18)
         self.set_margins(18, 18, 18)
+
+    def normalize_text(self, text):
+        text = str(text).translate(_TEXT_MAP)
+        return super().normalize_text(text.encode("latin-1", "ignore").decode("latin-1"))
 
     def header(self):
         # Orange gradient bar

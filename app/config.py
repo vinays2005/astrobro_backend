@@ -57,8 +57,10 @@ class Settings(BaseSettings):
 
     # LLM provider keys (read from env/Railway, never hardcoded)
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
-    groq_classifier_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "qwen/qwen3.8-27b"
+    groq_classifier_model: str = "qwen/qwen3.8-27b"
+    # Long-form PDF sections need ~3k output tokens; qwen's on-demand OTPM cap is 1000.
+    groq_report_model: str = "openai/gpt-oss-120b"
 
     # Razorpay
     razorpay_key_id: str = ""      # rzp_test_... or rzp_live_...

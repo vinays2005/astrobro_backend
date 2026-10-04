@@ -75,8 +75,8 @@ class GroqProvider(LLMProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        llm_model: str = "llama-3.1-8b-instant",
-        classifier_model: str = "llama-3.1-8b-instant",
+        llm_model: str = "qwen/qwen3.8-27b",
+        classifier_model: str = "qwen/qwen3.8-27b",
         timeout: int = 120,
     ) -> None:
         key = api_key or os.environ.get("GROQ_API_KEY")

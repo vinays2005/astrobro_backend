@@ -8,12 +8,12 @@ immediately (HTTP 202) before Railway's proxy timeout fires.
 """
 from __future__ import annotations
 
-import logging
 import os
 import tempfile
 import threading
 from pathlib import Path
 
+import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 
 from app.config import get_settings
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/books", tags=["books"])
 _settings = get_settings()
 _MAX_PDF_MB = 200  # raised from 50 — large classical texts can be 120MB+
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 # In-memory cache for the books list — scrolling 53k+ chunks on every request
 # takes 5+ minutes. Cache for 5 minutes; invalidated automatically on new ingestion.
@@ -150,7 +150,7 @@ async def ingest_book(
     }
 
 
-@router.get("/list")
+@router.get("/list", dependencies=[Depends(require_api_key)])
 async def list_books() -> dict:
     """List all books currently indexed in the vector store."""
     import time

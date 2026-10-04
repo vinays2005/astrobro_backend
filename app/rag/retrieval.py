@@ -96,7 +96,7 @@ class HybridRetriever:
                 with self._bm25_lock:
                     self._bm25_docs = docs
                     self._bm25 = bm25
-                log.info("bm25_warmup_done", docs=len(docs))
+                log.info("bm25_warmup_done docs=%d", len(docs))
         except Exception:
             log.warning("bm25_warmup_failed — BM25 will activate after first ingest")
 

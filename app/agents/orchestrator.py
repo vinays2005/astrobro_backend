@@ -76,9 +76,9 @@ class AgentOrchestrator:
         self._engine = engine or AstrologyEngine()
         self._llm = llm or GroqProvider(
             api_key=_s.groq_api_key or os.environ.get("GROQ_API_KEY"),
-            llm_model=_s.groq_model or os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant"),
+            llm_model=_s.groq_model or os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
             classifier_model=_s.groq_classifier_model or os.environ.get(
-                "GROQ_CLASSIFIER_MODEL", "llama-3.1-8b-instant"
+                "GROQ_CLASSIFIER_MODEL", "qwen/qwen3.8-27b"
             ),
         )
         self._retriever = retriever or HybridRetriever(

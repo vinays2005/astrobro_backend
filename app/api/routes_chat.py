@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import json
 
+import structlog
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
 from app.models.api import ChatRequest, ChatResponse
 from app.security.auth import require_api_key
 
+logger = structlog.get_logger()
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
@@ -63,7 +66,13 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             yield f"data: {json.dumps(done_payload)}\n\n"
 
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            logger.error("chat_stream_failed", request_id=request_id, error=str(exc))
+            message = (
+                "The AI service is busy right now. Please try again in a minute."
+                if isinstance(exc, APIStatusError)
+                else "Something went wrong. Please try again."
+            )
+            yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
 
     return StreamingResponse(
         event_generator(),

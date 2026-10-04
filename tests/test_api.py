@@ -1,6 +1,6 @@
 """
 API integration tests — tests the full HTTP layer.
-LLM calls are mocked so these run without Ollama.
+LLM calls are mocked so these run without Ollama/Groq.
 """
 from __future__ import annotations
 
@@ -9,14 +9,22 @@ from httpx import AsyncClient, ASGITransport
 from unittest.mock import AsyncMock, patch
 
 from app.main import app
+from app.security.auth import require_api_key
+
+
+async def _no_auth() -> None:
+    """Override require_api_key so tests don't need a real API key."""
+    return
 
 
 @pytest.fixture
 async def client():
+    app.dependency_overrides[require_api_key] = _no_auth
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+    app.dependency_overrides.clear()
 
 
 class TestHealth:
@@ -25,7 +33,7 @@ class TestHealth:
         assert r.status_code == 200
         data = r.json()
         assert data["status"] == "ok"
-        assert "ollama_connected" in data
+        assert "llm_connected" in data        # was ollama_connected before Groq migration
         assert "vector_db_chunks" in data
 
     async def test_root_returns_message(self, client: AsyncClient):
@@ -119,9 +127,10 @@ class TestChatEndpoint:
         }
 
         with patch(
-            "app.agents.orchestrator.AgentOrchestrator.run",
-            new_callable=AsyncMock,
-            return_value={**mock_response, "request_id": "test-123", "errors": []},
+            "app.api.routes_chat.get_orchestrator",
+            return_value=type("O", (), {"run": AsyncMock(
+                return_value={**mock_response, "request_id": "test-123", "errors": []}
+            )})(),
         ):
             r = await client.post("/api/chat/", json={
                 "question": "How is my career this year?",

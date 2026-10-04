@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import logging
+import re
 from datetime import datetime
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -21,8 +22,10 @@ from app.security.auth import require_api_key
 from app.astrology.engine import AstrologyEngine
 from app.services.pdf_generator import generate_report_pdf
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 router = APIRouter(prefix="/api/report", tags=["report"])
+
+_MD_LEAD = re.compile(r"^[\s#>*_\-]*(?:\d+[.)]\s*)?[*_]*")
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -40,6 +43,26 @@ class ReportRequest(BaseModel):
     razorpay_payment_id: str = ""
     razorpay_order_id: str = ""
     razorpay_signature: str = ""
+
+
+def _asc_sign(asc: object) -> str:
+    if isinstance(asc, dict):
+        return str(asc.get("sign", "-"))
+    return str(getattr(asc, "sign", asc))
+
+
+def _flat_dasha(dasha: dict) -> dict:
+    """Engine returns nested {lord,start,end} periods; PDF/AI code wants flat strings."""
+    def lord(p: object) -> str:
+        return str(p.get("lord", "-")) if isinstance(p, dict) else str(p or "-")
+
+    maha = dasha.get("mahadasha")
+    end = maha.get("end", "") if isinstance(maha, dict) else dasha.get("mahadasha_end", "")
+    return {
+        "mahadasha": lord(maha),
+        "antardasha": lord(dasha.get("antardasha")),
+        "mahadasha_end": str(end)[:10] or "-",
+    }
 
 
 # ── AI text generation ────────────────────────────────────────────────────────
@@ -110,7 +133,7 @@ For the Vedic Remedies section write 5-8 sentences covering the most important r
 Do NOT use generic filler text."""
 
         response = await client.chat.completions.create(
-            model=settings.groq_model,
+            model=settings.groq_report_model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=4000,
             temperature=0.6,
@@ -138,16 +161,18 @@ def _parse_ai_sections(raw: str) -> dict[str, str]:
     ]
 
     for line in raw.splitlines():
-        stripped = line.strip()
-        matched = next((lbl for lbl in labels if stripped.startswith(lbl)), None)
+        # Models wrap headings in markdown ("**Career & Profession**", "### 1. ...")
+        plain = _MD_LEAD.sub("", line.strip()).replace("**", "")
+        matched = next((lbl for lbl in labels if plain.startswith(lbl)), None)
         if matched:
             if current_key and current_lines:
                 sections[current_key] = " ".join(current_lines).strip()
             current_key = matched
-            rest = stripped[len(matched):].lstrip(":- ").strip()
+            rest = re.sub(r"^\s*\([^)]*\)", "", plain[len(matched):])
+            rest = rest.lstrip(":- ").strip()
             current_lines = [rest] if rest else []
-        elif current_key:
-            current_lines.append(stripped)
+        elif current_key and plain:
+            current_lines.append(plain)
 
     if current_key and current_lines:
         sections[current_key] = " ".join(current_lines).strip()
@@ -205,7 +230,7 @@ async def generate_report(body: ReportRequest) -> Response:
         )
         # Serialise to plain dict so pdf_generator can use it
         chart: dict = {
-            "ascendant": {"sign": chart_obj.ascendant.sign if hasattr(chart_obj.ascendant, "sign") else str(chart_obj.ascendant)},
+            "ascendant": {"sign": _asc_sign(chart_obj.ascendant)},
             "planets": {
                 k: {
                     "sign": p.sign, "house": p.house, "degree": p.sign_degree,
@@ -220,8 +245,11 @@ async def generate_report(body: ReportRequest) -> Response:
                 "pada": chart_obj.nakshatra_moon.pada,
                 "lord": chart_obj.nakshatra_moon.lord,
             },
-            "yogas": chart_obj.yogas,
-            "current_dasha": chart_obj.current_dasha,
+            "yogas": [
+                y.get("name", "") if isinstance(y, dict) else str(y)
+                for y in chart_obj.yogas
+            ],
+            "current_dasha": _flat_dasha(chart_obj.current_dasha or {}),
         }
     except Exception as exc:
         logger.error("chart_calculation_failed", error=str(exc))

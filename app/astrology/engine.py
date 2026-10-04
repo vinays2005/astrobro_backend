@@ -24,6 +24,7 @@ import threading
 import zoneinfo
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from datetime import timezone as datetime_timezone
 
 import swisseph as swe
 
@@ -324,11 +325,15 @@ class AstrologyEngine:
 
     # ── Ascendant + Planets ───────────────────────────────────────────────────
 
-    def _to_julian_day(self, dt: datetime, tz: str) -> float:
-        try:
-            tzinfo = zoneinfo.ZoneInfo(tz)
-        except Exception:
-            tzinfo = zoneinfo.ZoneInfo("UTC")
+    def _to_julian_day(self, dt: datetime, tz: str | float) -> float:
+        if isinstance(tz, (int, float)) and not isinstance(tz, bool):
+            # Numeric UTC offset in hours (e.g. 5.5 for IST)
+            tzinfo = datetime_timezone(timedelta(hours=float(tz)))
+        else:
+            try:
+                tzinfo = zoneinfo.ZoneInfo(tz)
+            except Exception:
+                tzinfo = zoneinfo.ZoneInfo("UTC")
         dt_utc = dt.replace(tzinfo=tzinfo).astimezone(zoneinfo.ZoneInfo("UTC"))
         hour = dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0
         return swe.julday(dt_utc.year, dt_utc.month, dt_utc.day, hour)

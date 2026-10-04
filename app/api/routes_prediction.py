@@ -1,12 +1,15 @@
 """Prediction routes — topic-specific AI astrology analysis."""
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
+from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
 from app.models.api import PredictionRequest
 from app.security.auth import require_api_key
 
+logger = structlog.get_logger()
 router = APIRouter(prefix="/api/prediction", tags=["prediction"])
 
 
@@ -24,8 +27,18 @@ async def get_prediction(request: PredictionRequest) -> dict:
             birth_data=request.birth_data.model_dump(),
             topic_hint=request.topic,
         )
+    except APIStatusError as exc:
+        # Provider rate/size limits: keep details (org id, quotas) server-side.
+        logger.error("prediction_llm_error", status=exc.status_code, error=str(exc))
+        raise HTTPException(
+            status_code=503,
+            detail="The AI service is busy right now. Please try again in a minute.",
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}") from exc
+        logger.error("prediction_failed", error=str(exc))
+        raise HTTPException(
+            status_code=500, detail="Prediction failed. Please try again."
+        ) from exc
 
     return result
 

@@ -17,8 +17,10 @@ from app.security.auth import require_api_key
 router = APIRouter(prefix="/api/payment", tags=["payment"])
 
 PLAN_PRICES: dict[str, int] = {
-    "monthly": 19900,   # ₹199 in paise
-    "yearly":  99900,   # ₹999 in paise
+    "weekly":    4900,   # ₹49  in paise
+    "monthly":  14900,   # ₹149 in paise
+    "quarterly": 39900,  # ₹399 in paise
+    "yearly":   99900,   # ₹999 in paise
 }
 
 
@@ -34,7 +36,7 @@ def _razorpay_client():
 # ── Request/response models ───────────────────────────────────────────────────
 
 class CreateOrderRequest(BaseModel):
-    plan_id: str   # "monthly" | "yearly"
+    plan_id: str   # "weekly" | "monthly" | "quarterly" | "yearly"
     user_id: str
 
 
