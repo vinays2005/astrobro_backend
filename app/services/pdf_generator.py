@@ -398,17 +398,27 @@ def generate_report_pdf(
             ))
             pdf.divider()
 
-    # ── Transit Today ─────────────────────────────────────────────────────────
+    # ── Key Remedies ──────────────────────────────────────────────────────────
     pdf.add_page()
     pdf.section_title("Key Remedies")
-    sun  = planets_dict.get("Sun", {})
-    moon_p = planets_dict.get("Moon", {})
+
     asc_sign_clean = asc_sign.lower()
 
-    remedies = _get_remedies(asc_sign_clean, dasha.get("mahadasha", ""))
-    for i, (title, remedy) in enumerate(remedies.items(), 1):
-        pdf.sub_title(f"{i}. {title}")
-        pdf.body_text(remedy)
+    if tier == "paid" and ai.get("Vedic Remedies"):
+        pdf.body_text(ai["Vedic Remedies"])
+    else:
+        remedies = _get_remedies(asc_sign_clean, dasha.get("mahadasha", ""))
+        for i, (title, remedy) in enumerate(remedies.items(), 1):
+            pdf.sub_title(f"{i}. {title}")
+            pdf.body_text(remedy)
+        if tier == "free":
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.set_text_color(*_GREY)
+            pdf.multi_cell(0, 5,
+                "Upgrade to AstroBro Premium for personalised AI-generated remedies — "
+                "specific gemstones, Beej mantras, yantra, puja procedures, and Lal Kitab "
+                "upayas tailored to your exact birth chart.")
+            pdf.set_text_color(*_DARK)
 
     # ── Paid extras ───────────────────────────────────────────────────────────
     if tier == "paid":

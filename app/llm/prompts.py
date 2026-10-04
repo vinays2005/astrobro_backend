@@ -169,4 +169,39 @@ CHAT_STREAM_PROMPT = """Answer the user's Vedic astrology question using ONLY th
 
 Write a conversational answer in 3-6 sentences. Plain text only — no JSON, no markdown, no bullet points.
 Speak directly to the user about what their chart indicates.
+If the question relates to a challenge, weakness, or dosha in the chart, add 1-2 sentences at the end suggesting a specific Vedic remedy (gemstone, mantra, or simple upaya) classically recommended for that placement.
+For detailed personalised remedies, mention: "Your Premium PDF report includes a full Jyotish remedies section."
+"""
+
+REMEDIES_PROMPT = """Based on this Vedic birth chart, provide personalised Jyotish remedies.
+
+=== CHART DATA ===
+{chart_json}
+
+=== DASHA DATA ===
+{dasha_json}
+
+=== BOOK EVIDENCE ON REMEDIES ===
+{evidence_json}
+
+Provide practical Vedic remedies in these categories. Label each section exactly as shown:
+
+Gemstone Therapy: specific gem for ascendant lord and current dasha lord, with day to wear and metal.
+
+Mantra Practice: specific Beej mantra(s) with exact count (108 or 1008), best time of day, and direction to face.
+
+Yantra: which yantra is most beneficial, how to install (day, metal/paper), and where to keep it.
+
+Puja & Worship: recommended deity based on chart, which day, simple puja procedure or stotra.
+
+Charity (Daana): specific items to donate, to whom, on which weekday, and in which direction.
+
+Fasting (Vrat): which weekday to fast, what to abstain from, and the associated planetary deity.
+
+Lal Kitab Upaya: one simple practical remedy from Lal Kitab tradition based on the most prominent chart factor.
+
+{tier_instruction}
+
+Use hedged language throughout: "classically recommended", "traditionally advised", "may help strengthen".
+Write in plain paragraphs. No JSON, no markdown headers, no bullet points.
 """

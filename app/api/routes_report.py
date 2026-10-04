@@ -103,14 +103,16 @@ Write ONE paragraph for EACH of these sections (label each with the exact sectio
 - Varshaphal (annual prediction for current year)
 - Sade Sati (current Saturn position impact)
 - Kalsarpa (Kalsarpa Dosh analysis)
+- Vedic Remedies (personalised remedies: gemstone, mantra, yantra, puja, charity, fasting — specific to this chart)
 
 Keep each paragraph personal, specific to the chart, and practically useful.
+For the Vedic Remedies section write 5-8 sentences covering the most important remedies for this specific chart.
 Do NOT use generic filler text."""
 
         response = await client.chat.completions.create(
             model=settings.groq_model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=3000,
+            max_tokens=4000,
             temperature=0.6,
         )
         raw = response.choices[0].message.content or ""
@@ -132,7 +134,7 @@ def _parse_ai_sections(raw: str) -> dict[str, str]:
         "Finance & Wealth", "Education & Knowledge", "Family & Domestic Life",
         "Children & Progeny", "Property & Assets", "Travels & Foreign Connections",
         "Spirituality & Dharma", "Enemies & Legal Matters", "Longevity & Hidden Matters",
-        "Lucky Profile", "Varshaphal", "Sade Sati", "Kalsarpa",
+        "Lucky Profile", "Varshaphal", "Sade Sati", "Kalsarpa", "Vedic Remedies",
     ]
 
     for line in raw.splitlines():
