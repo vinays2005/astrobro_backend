@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from groq import APIStatusError
 
@@ -20,14 +20,21 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 async def chat(request: ChatRequest) -> dict:
     """Single-turn AI astrology chat."""
     orchestrator = get_orchestrator()
-    result = await orchestrator.run(
-        user_input=request.question,
-        birth_data=request.birth_data.model_dump() if request.birth_data else None,
-        conversation_history=request.conversation_history,
-        force_chat=True,
-        language=request.language,
-    )
-    return result
+    try:
+        return await orchestrator.run(
+            user_input=request.question,
+            birth_data=request.birth_data.model_dump() if request.birth_data else None,
+            conversation_history=request.conversation_history,
+            force_chat=True,
+            language=request.language,
+        )
+    except APIStatusError as exc:
+        # Provider rate/size limits: keep details (org id, quotas) server-side.
+        logger.error("chat_llm_error", status=exc.status_code, error=str(exc))
+        raise HTTPException(
+            status_code=503,
+            detail="The AI service is busy right now. Please try again in a minute.",
+        ) from exc
 
 
 @router.post("/stream", dependencies=[Depends(require_api_key)])

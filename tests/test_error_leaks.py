@@ -54,6 +54,32 @@ class TestPredictionErrors:
         assert "org_01" not in r.text
 
 
+class TestChatErrors:
+    async def test_provider_error_becomes_503_without_internals(self, client):
+        orch = MagicMock()
+        orch.run.side_effect = _provider_error()
+        with patch("app.api.routes_chat.get_orchestrator", return_value=orch):
+            r = await client.post("/api/chat/", json={"question": "hi", "birth_data": _BIRTH})
+        assert r.status_code == 503
+        assert "busy" in r.json()["detail"]
+        assert "org_01" not in r.text and "8000" not in r.text
+
+    async def test_unexpected_error_is_a_generic_500(self):
+        orch = MagicMock()
+        orch.run.side_effect = RuntimeError(_SECRET)
+        app.dependency_overrides[require_api_key] = lambda: None
+        try:
+            # The app's catch-all handler answers 500; keep the test client from re-raising the error afterwards.
+            transport = ASGITransport(app=app, raise_app_exceptions=False)
+            async with AsyncClient(transport=transport, base_url="http://test", timeout=30) as ac:
+                with patch("app.api.routes_chat.get_orchestrator", return_value=orch):
+                    r = await ac.post("/api/chat/", json={"question": "hi"})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 500
+        assert "org_01" not in r.text
+
+
 class TestChatStreamErrors:
     async def test_stream_error_event_is_generic(self, client):
         async def boom(**_kw):
