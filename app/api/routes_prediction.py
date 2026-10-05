@@ -26,6 +26,7 @@ async def get_prediction(request: PredictionRequest) -> dict:
             user_input=f"Give a detailed {request.topic} analysis for my chart",
             birth_data=request.birth_data.model_dump(),
             topic_hint=request.topic,
+            language=request.language,
         )
     except APIStatusError as exc:
         # Provider rate/size limits: keep details (org id, quotas) server-side.

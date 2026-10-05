@@ -25,6 +25,7 @@ async def chat(request: ChatRequest) -> dict:
         birth_data=request.birth_data.model_dump() if request.birth_data else None,
         conversation_history=request.conversation_history,
         force_chat=True,
+        language=request.language,
     )
     return result
 
@@ -51,6 +52,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 user_input=request.question,
                 birth_data=request.birth_data.model_dump() if request.birth_data else None,
                 conversation_history=request.conversation_history,
+                language=request.language,
             ):
                 full_text += token
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"

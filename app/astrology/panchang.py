@@ -34,6 +34,7 @@ import swisseph as swe
 _SWE_LOCK = threading.Lock()
 
 from app.astrology.constants import NAKSHATRAS, SIGNS
+from app.astrology.matching import GANA_NAMES, NAK_GANA
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -129,6 +130,9 @@ class PanchangResult:
     masa: str
     ayana: str
     ritu: str
+    masa_purnimanta: str = ""
+    adhika_masa: bool = False
+    moon_phase: str = ""
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -227,13 +231,22 @@ _CHOGHADIYA_QUALITY = {
     "Char": "neutral", "Rog": "inauspicious", "Kaal": "inauspicious",
     "Udveg": "inauspicious",
 }
-_CHOGHADIYA_DAY_START   = [0, 6, 5, 4, 3, 2, 1]
-_CHOGHADIYA_NIGHT_START = [4, 3, 2, 1, 0, 6, 5]
+# Day: the first slot belongs to the weekday lord (Sun Udveg, Moon Amrit, Mars Rog, Mercury Labh,
+# Jupiter Shubh, Venus Char, Saturn Kaal). Night: starts from the lord four weekdays ahead.
+_CHOGHADIYA_DAY_START   = [0, 3, 6, 2, 5, 1, 4]
+_CHOGHADIYA_NIGHT_START = [0, 2, 4, 6, 1, 3, 5]
+
+
+def choghadiya_names(vara_idx: int, night: bool = False) -> list[str]:
+    """The eight Choghadiya names for a weekday (Sunday=0); the cycle has seven names and wraps."""
+    order = (_CHOGHADIYA_NIGHT_ORDER if night else _CHOGHADIYA_DAY_ORDER)[:7]
+    start = (_CHOGHADIYA_NIGHT_START if night else _CHOGHADIYA_DAY_START)[vara_idx]
+    return [order[(start + i) % 7] for i in range(8)]
 
 # Hora planet order (starting from sunrise on each weekday)
 # Sunday: Sun, Venus, Mercury, Moon, Saturn, Jupiter, Mars, Sun, ...
 _HORA_PLANET_ORDER = ["Sun", "Venus", "Mercury", "Moon", "Saturn", "Jupiter", "Mars"]
-_HORA_START_INDEX  = [0, 6, 5, 4, 3, 2, 1]  # Sun=0 start index per weekday
+_HORA_START_INDEX  = [0, 3, 6, 2, 5, 1, 4]  # first hora of each weekday is its own lord's
 
 _HINDU_MONTHS = [
     "Chaitra", "Vaishakha", "Jyeshtha", "Ashadha", "Shravana", "Bhadrapada",
@@ -248,13 +261,7 @@ _NAKSHATRA_DEITIES = [
     "Nirriti", "Apah", "Vishvadeva", "Vishnu", "Varuna", "Aja Ekapad",
     "Ahir Budhnya", "Pushan", "Ashvini Kumaras",
 ]
-_NAKSHATRA_GANAS = [
-    "Deva", "Manushya", "Rakshasa", "Deva", "Manushya", "Manushya",
-    "Deva", "Manushya", "Rakshasa", "Pitru", "Manushya", "Manushya",
-    "Deva", "Manushya", "Rakshasa", "Manushya", "Deva", "Manushya",
-    "Rakshasa", "Deva", "Rakshasa", "Deva", "Manushya", "Deva",
-    "Rakshasa", "Manushya", "Deva",
-]
+_NAKSHATRA_GANAS = [GANA_NAMES[g] for g in NAK_GANA]
 
 _SIGN_NAMES = [
     "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
@@ -311,11 +318,16 @@ class PanchangEngine:
         chog     = self._choghadiya(sun_moon.sunrise_jd, sun_moon.sunset_jd, vara_idx, tz)
         hora     = self._hora(sun_moon.sunrise_jd, sun_moon.sunset_jd, jd_midnight, vara_idx, tz)
 
+        from app.astrology import calendar_hindu as CH
+        from app.astrology import ephem as E
+
         sun_rashi  = _SIGN_NAMES[int(sun_lon / 30) % 12]
         moon_rashi = _SIGN_NAMES[int(moon_lon / 30) % 12]
-        masa       = self._masa(sun_lon)
+        lunar      = CH.masa_info(jd)
+        masa       = lunar.get("label") or self._masa(sun_lon)
         ayana      = self._ayana(sun_lon)
-        ritu       = self._ritu(sun_lon)
+        ritu       = _RITUS[CH.MASA_NAMES.index(lunar["amanta"]) // 2] if lunar.get("amanta") else self._ritu(sun_lon)
+        year_info  = CH.hindu_year(target_date, tz)
 
         return PanchangResult(
             date=target_date.isoformat(),
@@ -337,11 +349,14 @@ class PanchangEngine:
             disha_shool=_DISHA_SHOOL[vara_idx],
             choghadiya=chog,
             hora=hora,
-            vikram_samvat=self._vikram_samvat(target_date),
-            shaka_samvat=self._shaka_samvat(target_date),
+            vikram_samvat=year_info["vikram_samvat"],
+            shaka_samvat=year_info["shaka_samvat"],
             masa=masa,
             ayana=ayana,
             ritu=ritu,
+            masa_purnimanta=lunar.get("purnimanta", ""),
+            adhika_masa=bool(lunar.get("adhika")),
+            moon_phase=E.moon_phase_name(E.elongation(jd)),
         )
 
     # ── Core Panchang limbs ───────────────────────────────────────────────────
@@ -423,36 +438,20 @@ class PanchangEngine:
     # ── Sunrise / Moonrise ────────────────────────────────────────────────────
 
     def _sunrise_sunset(self, jd_midnight: float, lat: float, lon: float, tz: str) -> SunriseSunset:
-        try:
-            sr_flags = swe.CALC_RISE | swe.BIT_DISC_CENTER
-            ss_flags = swe.CALC_SET  | swe.BIT_DISC_CENTER
-            _, sr = swe.rise_trans(jd_midnight, swe.SUN,  "", swe.FLG_SWIEPH, sr_flags, lat, lon, 0)
-            _, ss = swe.rise_trans(jd_midnight, swe.SUN,  "", swe.FLG_SWIEPH, ss_flags, lat, lon, 0)
-            _, mr = swe.rise_trans(jd_midnight, swe.MOON, "", swe.FLG_SWIEPH, swe.CALC_RISE, lat, lon, 0)
-            _, ms = swe.rise_trans(jd_midnight, swe.MOON, "", swe.FLG_SWIEPH, swe.CALC_SET,  lat, lon, 0)
+        from app.astrology import ephem as E
 
-            sr_jd = sr[0] if hasattr(sr, '__iter__') else float(sr)
-            ss_jd = ss[0] if hasattr(ss, '__iter__') else float(ss)
-            mr_jd = mr[0] if hasattr(mr, '__iter__') else float(mr)
-            ms_jd = ms[0] if hasattr(ms, '__iter__') else float(ms)
-
-            return SunriseSunset(
-                sunrise=self._jd_to_local_str(sr_jd, tz),
-                sunset=self._jd_to_local_str(ss_jd, tz),
-                moonrise=self._jd_to_local_str(mr_jd, tz),
-                moonset=self._jd_to_local_str(ms_jd, tz),
-                sunrise_jd=sr_jd, sunset_jd=ss_jd,
-                day_duration_hours=round((ss_jd - sr_jd) * 24.0, 2),
-            )
-        except Exception:
-            approx_sr = jd_midnight + 6.0 / 24.0
-            approx_ss = jd_midnight + 18.0 / 24.0
-            return SunriseSunset(
-                sunrise="06:00", sunset="18:00",
-                moonrise="--:--", moonset="--:--",
-                sunrise_jd=approx_sr, sunset_jd=approx_ss,
-                day_duration_hours=12.0,
-            )
+        sr_jd, ss_jd = E.sun_rise_set(jd_midnight, lat, lon)
+        mr_jd, ms_jd = E.moon_rise_set(jd_midnight, lat, lon)
+        if sr_jd is None or ss_jd is None:  # circumpolar day/night: fall back to an even 12-hour day
+            sr_jd, ss_jd = jd_midnight + 6.0 / 24.0, jd_midnight + 18.0 / 24.0
+        return SunriseSunset(
+            sunrise=self._jd_to_local_str(sr_jd, tz),
+            sunset=self._jd_to_local_str(ss_jd, tz),
+            moonrise=self._jd_to_local_str(mr_jd, tz) if mr_jd else "--:--",
+            moonset=self._jd_to_local_str(ms_jd, tz) if ms_jd else "--:--",
+            sunrise_jd=sr_jd, sunset_jd=ss_jd,
+            day_duration_hours=round((ss_jd - sr_jd) * 24.0, 2),
+        )
 
     # ── Auspicious / Inauspicious timings ────────────────────────────────────
 
@@ -526,11 +525,11 @@ class PanchangEngine:
         day_slot   = day_dur / 8.0
         night_slot = night_dur / 8.0
 
-        day_off   = _CHOGHADIYA_DAY_START[vara_idx]
-        night_off = _CHOGHADIYA_NIGHT_START[vara_idx]
+        day_names   = choghadiya_names(vara_idx, night=False)
+        night_names = choghadiya_names(vara_idx, night=True)
 
         for i in range(8):
-            name = _CHOGHADIYA_DAY_ORDER[(day_off + i) % 8]
+            name = day_names[i]
             s = sr_jd + i * day_slot
             e = s + day_slot
             result.append(Muhurat(
@@ -539,7 +538,7 @@ class PanchangEngine:
                 quality=_CHOGHADIYA_QUALITY[name], is_night=False,
             ))
         for i in range(8):
-            name = _CHOGHADIYA_NIGHT_ORDER[(night_off + i) % 8]
+            name = night_names[i]
             s = ss_jd + i * night_slot
             e = s + night_slot
             result.append(Muhurat(

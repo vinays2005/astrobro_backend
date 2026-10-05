@@ -70,3 +70,4 @@ logs/
 __pycache__.zip
 books_test/
 app/books/
+books_free/

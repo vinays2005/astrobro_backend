@@ -27,8 +27,8 @@ _MAX_PDF_MB = 200  # raised from 50 — large classical texts can be 120MB+
 
 log = structlog.get_logger()
 
-# In-memory cache for the books list — scrolling 53k+ chunks on every request
-# takes 5+ minutes. Cache for 5 minutes; invalidated automatically on new ingestion.
+# In-memory cache for the books list so repeated calls do not hit the vector DB.
+# Cached for 5 minutes; invalidated automatically on new ingestion.
 _books_cache: dict | None = None
 _books_cache_at: float = 0.0
 _BOOKS_CACHE_TTL = 300.0  # seconds
@@ -150,9 +150,46 @@ async def ingest_book(
     }
 
 
+def _count_books() -> dict:
+    """Blocking: chunks per book title. Runs in a worker thread so it never stalls the event loop."""
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient(url=_settings.qdrant_url, api_key=_settings.qdrant_api_key or None, timeout=30)
+    collection = _settings.books_collection
+    if not client.collection_exists(collection):
+        return {"total_chunks": 0, "books": []}
+    total = client.get_collection(collection).points_count or 0
+
+    books: dict[str, int] | None = None
+    try:
+        # Fast path: the server counts per value of the keyword-indexed `book` field.
+        limit = 10_000
+        hits = client.facet(collection_name=collection, key="book", limit=limit, exact=True).hits
+        if len(hits) < limit:  # a full page means the list may be cut short, so scroll instead
+            books = {str(h.value): h.count for h in hits}
+    except Exception as exc:
+        log.info("books_facet_unavailable", error=str(exc))
+
+    if books is None:
+        books = {}
+        offset = None
+        while True:
+            points, offset = client.scroll(
+                collection_name=collection, limit=1000, offset=offset, with_payload=["book"], with_vectors=False,
+            )
+            for point in points:
+                title = str((point.payload or {}).get("book", "Unknown"))
+                books[title] = books.get(title, 0) + 1
+            if offset is None:
+                break
+
+    return {"total_chunks": total, "books": [{"title": t, "chunks": c} for t, c in sorted(books.items())]}
+
+
 @router.get("/list", dependencies=[Depends(require_api_key)])
 async def list_books() -> dict:
     """List all books currently indexed in the vector store."""
+    import asyncio
     import time
     global _books_cache, _books_cache_at
 
@@ -161,37 +198,10 @@ async def list_books() -> dict:
         return _books_cache
 
     try:
-        from qdrant_client import QdrantClient
-        client = QdrantClient(url=_settings.qdrant_url, api_key=_settings.qdrant_api_key or None, timeout=30)
-
-        if not client.collection_exists(_settings.books_collection):
-            return {"total_chunks": 0, "books": []}
-
-        info = client.get_collection(_settings.books_collection)
-        total = info.points_count or 0
-
-        books: dict[str, int] = {}
-        offset = None
-        while True:
-            points, offset = client.scroll(
-                collection_name=_settings.books_collection,
-                limit=1000,
-                offset=offset,
-                with_payload=["book"],
-                with_vectors=False,
-            )
-            for point in points:
-                book_title = str((point.payload or {}).get("book", "Unknown"))
-                books[book_title] = books.get(book_title, 0) + 1
-            if offset is None:
-                break
-
-        result = {
-            "total_chunks": total,
-            "books": [{"title": t, "chunks": c} for t, c in sorted(books.items())],
-        }
-        _books_cache = result
-        _books_cache_at = now
-        return result
+        result = await asyncio.to_thread(_count_books)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Vector DB error: {exc}") from exc
+        log.error("books_list_failed", error=str(exc))
+        raise HTTPException(status_code=502, detail="The book index is unavailable right now.") from None
+    _books_cache = result
+    _books_cache_at = now
+    return result

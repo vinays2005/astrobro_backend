@@ -105,7 +105,12 @@ class TestPredictionTopics:
 
 class TestBooksEndpoints:
     async def test_list_books_returns_dict(self, client: AsyncClient):
-        r = await client.get("/api/books/list")
+        from app.api import routes_books
+
+        routes_books._invalidate_books_cache()
+        with patch.object(routes_books, "_count_books", return_value={"total_chunks": 0, "books": []}):
+            r = await client.get("/api/books/list")
+        routes_books._invalidate_books_cache()
         assert r.status_code == 200
         data = r.json()
         assert "total_chunks" in data

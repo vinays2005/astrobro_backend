@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     groq_classifier_model: str = "qwen/qwen3.8-27b"
     # Long-form PDF sections need ~3k output tokens; qwen's on-demand OTPM cap is 1000.
     groq_report_model: str = "openai/gpt-oss-120b"
+    groq_stt_model: str = "whisper-large-v3-turbo"
 
     # Razorpay
     razorpay_key_id: str = ""      # rzp_test_... or rzp_live_...

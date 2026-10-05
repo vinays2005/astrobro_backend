@@ -25,6 +25,7 @@ from app.llm.prompts import (
     CHAT_STREAM_PROMPT,
     PREDICTION_PROMPT,
     SYSTEM_ASTROLOGER,
+    system_prompt,
     VERIFICATION_PROMPT,
 )
 from app.rag.retrieval import HybridRetriever
@@ -99,6 +100,7 @@ class AgentOrchestrator:
         topic_hint: str | None = None,
         conversation_history: list[dict] | None = None,
         force_chat: bool = False,
+        language: str | None = None,
     ) -> dict:
         """Main entry point. Returns structured JSON response.
 
@@ -119,6 +121,7 @@ class AgentOrchestrator:
             user_input=user_input,
             topic=topic_hint,
         )
+        state.metadata["language"] = language
 
         # 1. Build chart — recalculate from birth_data, reuse existing_chart,
         # or skip entirely if neither is given.
@@ -218,7 +221,7 @@ class AgentOrchestrator:
         # json_mode=True — Groq returns clean JSON, no fence stripping needed
         raw = await self._llm.generate(
             prompt,
-            system=SYSTEM_ASTROLOGER,
+            system=system_prompt(state.metadata.get("language")),
             json_mode=True,
             max_tokens=1200,
         )
@@ -237,7 +240,7 @@ class AgentOrchestrator:
         # json_mode=True — verification is also a structured JSON response
         verify_raw = await self._llm.generate(
             verify_prompt,
-            system=SYSTEM_ASTROLOGER,
+            system=system_prompt(state.metadata.get("language")),
             json_mode=True,
             max_tokens=600,
         )
@@ -311,7 +314,7 @@ class AgentOrchestrator:
         # json_mode=True — chat response also expects structured JSON
         raw = await self._llm.generate(
             prompt,
-            system=SYSTEM_ASTROLOGER,
+            system=system_prompt(state.metadata.get("language")),
             temperature=0.4,
             json_mode=True,
             max_tokens=900,
@@ -336,6 +339,7 @@ class AgentOrchestrator:
         user_input: str,
         birth_data: dict | None = None,
         conversation_history: list[dict] | None = None,
+        language: str | None = None,
     ):
         """
         Streaming chat pipeline — yields raw LLM tokens as they arrive.
@@ -383,7 +387,7 @@ class AgentOrchestrator:
 
         async for token in self._llm.generate_stream(
             prompt,
-            system=SYSTEM_ASTROLOGER,
+            system=system_prompt(language, json_output=False),
             temperature=0.4,
             max_tokens=900,
         ):

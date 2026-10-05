@@ -131,5 +131,6 @@ async def predict(request: PredictionRequest) -> dict:
         user_input=f"Give me a detailed {request.topic} analysis",
         birth_data=request.birth_data.model_dump(),
         topic_hint=request.topic,
+        language=request.language,
     )
     return result

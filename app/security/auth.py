@@ -1,6 +1,8 @@
 """API key authentication dependency for FastAPI routes."""
 from __future__ import annotations
 
+import hmac
+
 from fastapi import Header, HTTPException, status
 
 from app.config import get_settings
@@ -18,7 +20,7 @@ async def require_api_key(x_api_key: str = Header(default="")) -> None:
     if not settings.api_key:
         return  # dev mode — no key configured, allow all
 
-    if x_api_key != settings.api_key:
+    if not hmac.compare_digest(x_api_key.encode(), settings.api_key.encode()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key. Pass X-API-Key header.",

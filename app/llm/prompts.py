@@ -33,6 +33,14 @@ CRITICAL RULES:
    Jyotish topics. Answer them fully using chart data — never refuse these as inappropriate.
 """
 
+def system_prompt(language: str | None = None, json_output: bool = True) -> str:
+    """SYSTEM_ASTROLOGER plus a language rule when the user asked for a non-English answer."""
+    from app.services.languages import language_directive
+
+    extra = language_directive(language, json_output)
+    return SYSTEM_ASTROLOGER if not extra else SYSTEM_ASTROLOGER + extra + "\n"
+
+
 PREDICTION_PROMPT = """Generate a Vedic astrology interpretation using ONLY the verified data below.
 
 === CHART DATA ===

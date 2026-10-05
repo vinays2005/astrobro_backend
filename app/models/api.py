@@ -48,6 +48,7 @@ class PredictionRequest(BaseModel):
         "career", "marriage", "finance", "education", "health",
         "children", "property", "travel", "spirituality", "general"
     ]
+    language: str = Field(default="english")
 
 
 class ChatRequest(BaseModel):
@@ -170,3 +171,4 @@ class HealthResponse(BaseModel):
     version: str = "1.0.0"
     llm_connected: bool = False
     vector_db_chunks: int = 0
+    ai_ready: bool = False
