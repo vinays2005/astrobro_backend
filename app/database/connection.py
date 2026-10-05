@@ -11,6 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
 from app.database.models import Base
+from app.services.waiters import waiters
 
 _log = logging.getLogger(__name__)
 _settings = get_settings()
@@ -63,8 +64,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
+            waiters.flush(session)
         except Exception:
             await session.rollback()
+            waiters.discard(session)
             raise
 
 
@@ -77,6 +80,8 @@ async def session_scope() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
+            waiters.flush(session)
         except Exception:
             await session.rollback()
+            waiters.discard(session)
             raise

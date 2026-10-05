@@ -243,8 +243,9 @@ class TestAssistantApis:
         assert feats["total"] == sum(feats["by_status"].values())
         ids = {f["id"] for g in feats["groups"].values() for f in g}
         assert {"ai_chat", "horoscope", "muhurat", "tarot", "human_consultation"} <= ids
-        marketplace = [f for f in feats["groups"]["Marketplace"]]
-        assert marketplace and all(f["status"] == "out_of_scope" for f in marketplace)
+        marketplace = {f["id"]: f["status"] for f in feats["groups"]["Marketplace"]}
+        assert marketplace["human_consultation"] == "live" and marketplace["puja_booking"] == "live"
+        assert marketplace["live_sessions"] == "out_of_scope"                  # free live-streamed sessions are still not built
         live = [f for g in feats["groups"].values() for f in g if f["status"] == "live"]
         routes = {r.path for r in app.routes}
         for f in live:

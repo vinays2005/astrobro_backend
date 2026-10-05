@@ -32,6 +32,11 @@ from app.api.routes_calendar import router as calendar_router
 from app.api.routes_assistant import router as assistant_router
 from app.api.routes_billing import router as billing_router, webhook_router as billing_webhook_router
 from app.api.routes_me import router as me_router
+from app.api.routes_astrologers import router as astrologers_router
+from app.api.routes_consult import router as consult_router
+from app.api.routes_bookings import router as bookings_router
+from app.api.routes_admin import router as admin_router
+from app.services.errors import ServiceError
 from app.database.connection import init_db
 
 logger = structlog.get_logger()
@@ -71,10 +76,34 @@ async def lifespan(app: FastAPI):
         logger.warning("orchestrator_unavailable", error=str(exc), retry_in_s=_ORCHESTRATOR_RETRY_SECONDS)
         retry_task = asyncio.create_task(_retry_orchestrator())
 
+    sweeper_task = asyncio.create_task(_sweep_consultations())
+
     yield
+    sweeper_task.cancel()
     if retry_task is not None:
         retry_task.cancel()
     logger.info("astrobro_stopping")
+
+
+SWEEP_SECONDS = 10.0
+
+
+async def _sweep_consultations() -> None:
+    """Every few seconds: expire unanswered requests, bill running consultations, end dead ones."""
+    from app.database.connection import session_scope
+    from app.services import consult
+
+    while True:
+        await asyncio.sleep(SWEEP_SECONDS)
+        try:
+            async with session_scope() as db:
+                counts = await consult.sweep(db)
+            if any(counts.values()):
+                logger.info("consult_sweep", **counts)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                                  # one bad pass must never stop the loop
+            logger.warning("consult_sweep_failed", error=str(exc))
 
 
 _ORCHESTRATOR_RETRY_SECONDS = 60.0
@@ -139,6 +168,11 @@ def create_app() -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         return response
 
+    @app.exception_handler(ServiceError)
+    async def service_error(request: Request, exc: ServiceError):
+        http = exc.to_http()
+        return JSONResponse(status_code=http.status_code, content={"detail": http.detail})
+
     @app.exception_handler(AIUnavailableError)
     async def ai_unavailable(request: Request, exc: AIUnavailableError):
         return JSONResponse(
@@ -174,7 +208,8 @@ def create_app() -> FastAPI:
     app.include_router(panchang_router)
     for r in (horoscope_router, transit_router, dasha_router, dosha_router, remedies_router, match_router,
               love_router, numerology_router, tarot_router, vastu_router, muhurat_router, calendar_router,
-              assistant_router, billing_router, billing_webhook_router, me_router):
+              assistant_router, billing_router, billing_webhook_router, me_router, astrologers_router, consult_router,
+              bookings_router, admin_router):
         app.include_router(r)
 
     @app.get("/")

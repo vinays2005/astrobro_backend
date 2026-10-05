@@ -7,6 +7,8 @@ Tables:
   chats    — conversation history per kundli
   accounts, entitlements, usage_daily, payments — who is calling, what they have paid for and used
   wallets, wallet_entries — prepaid balance for consultations (every change has a ledger row)
+  astrologers, consult_sessions, consult_messages, earnings_entries, reviews, abuse_reports — human consultations
+  service_items, bookings — pandit and puja bookings
 """
 from __future__ import annotations
 
@@ -90,6 +92,7 @@ class Account(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime)   # 18+ and consultation terms
 
 
 class Entitlement(Base):
@@ -154,3 +157,149 @@ class WalletEntry(Base):
     ref_id: Mapped[str | None] = mapped_column(String(80))
     note: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ── Human astrologers: profiles, consultations, earnings ─────────────────────
+
+class Astrologer(Base):
+    """A person who consults with users. Listed only after an admin approves them."""
+    __tablename__ = "astrologers"
+
+    uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    bio: Mapped[str] = mapped_column(Text, default="")
+    photo_url: Mapped[str | None] = mapped_column(String(500))
+    languages: Mapped[list] = mapped_column(JSON, default=list)
+    specialties: Mapped[list] = mapped_column(JSON, default=list)
+    experience_years: Mapped[int] = mapped_column(Integer, default=0)
+    chat_rate_paise: Mapped[int | None] = mapped_column(Integer)      # per minute; None = not offered
+    call_rate_paise: Mapped[int | None] = mapped_column(Integer)
+    video_rate_paise: Mapped[int | None] = mapped_column(Integer)
+    payout_upi: Mapped[str | None] = mapped_column(String(100))       # where the admin sends earnings; never shown to users
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)   # pending | approved | rejected | suspended
+    status_note: Mapped[str | None] = mapped_column(String(300))
+    is_online: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
+    rating_avg: Mapped[float] = mapped_column(Float, default=0.0)
+    rating_count: Mapped[int] = mapped_column(Integer, default=0)
+    sessions_count: Mapped[int] = mapped_column(Integer, default=0)
+    minutes_total: Mapped[int] = mapped_column(Integer, default=0)
+    earnings_paise: Mapped[int] = mapped_column(Integer, default=0)   # earned and not yet paid out
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ConsultSession(Base):
+    """One consultation. Billed a minute at a time from the user's wallet (see app/services/consult.py)."""
+    __tablename__ = "consult_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    user_uid: Mapped[str] = mapped_column(String(128), index=True)
+    astrologer_uid: Mapped[str] = mapped_column(String(128), index=True)
+    mode: Mapped[str] = mapped_column(String(8))                      # chat | call | video
+    status: Mapped[str] = mapped_column(String(12), default="requested", index=True)
+    # requested | active | ended | declined | expired | cancelled
+    rate_paise_per_min: Mapped[int] = mapped_column(Integer)
+    commission_percent: Mapped[int] = mapped_column(Integer)
+    topic: Mapped[str | None] = mapped_column(String(200))
+    birth_snapshot: Mapped[dict | None] = mapped_column(JSON)         # birth details the user chose to share
+    room: Mapped[str | None] = mapped_column(String(80))              # video/voice room name
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ended_by: Mapped[str | None] = mapped_column(String(12))          # user | astrologer | system
+    end_reason: Mapped[str | None] = mapped_column(String(40))
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    billed_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    charged_paise: Mapped[int] = mapped_column(Integer, default=0)
+    astrologer_earned_paise: Mapped[int] = mapped_column(Integer, default=0)
+    refunded_paise: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ConsultMessage(Base):
+    __tablename__ = "consult_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    sender_uid: Mapped[str] = mapped_column(String(128))
+    body: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(8), default="text")      # text | system
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class EarningsEntry(Base):
+    """An astrologer's ledger: money earned per billed minute, and payouts the admin has sent."""
+    __tablename__ = "earnings_entries"
+    __table_args__ = (UniqueConstraint("kind", "ref_type", "ref_id", name="uq_earnings_entry_ref"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    astrologer_uid: Mapped[str] = mapped_column(String(128), index=True)
+    kind: Mapped[str] = mapped_column(String(12))                     # consult | payout | adjustment
+    amount_paise: Mapped[int] = mapped_column(Integer)                # earned positive, paid out negative
+    balance_after_paise: Mapped[int] = mapped_column(Integer)
+    ref_type: Mapped[str | None] = mapped_column(String(20))
+    ref_id: Mapped[str | None] = mapped_column(String(80))
+    note: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(36), unique=True)
+    user_uid: Mapped[str] = mapped_column(String(128))
+    astrologer_uid: Mapped[str] = mapped_column(String(128), index=True)
+    rating: Mapped[int] = mapped_column(Integer)                      # 1..5
+    comment: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AbuseReport(Base):
+    __tablename__ = "abuse_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reporter_uid: Mapped[str] = mapped_column(String(128))
+    target_uid: Mapped[str] = mapped_column(String(128), index=True)
+    session_id: Mapped[str | None] = mapped_column(String(36))
+    reason: Mapped[str] = mapped_column(String(40))
+    details: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(10), default="open")   # open | reviewed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ── Pandit and puja bookings ──────────────────────────────────────────────────
+
+class ServiceItem(Base):
+    """Something a user can book: a puja, a homa, a pandit visit. Managed by the admin."""
+    __tablename__ = "service_items"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)     # slug
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(30), default="puja")
+    price_paise: Mapped[int] = mapped_column(Integer)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Booking(Base):
+    __tablename__ = "bookings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    user_uid: Mapped[str] = mapped_column(String(128), index=True)
+    service_id: Mapped[str] = mapped_column(String(40))
+    service_name: Mapped[str] = mapped_column(String(120))            # copied, so later renames do not rewrite history
+    status: Mapped[str] = mapped_column(String(16), default="pending_payment", index=True)
+    # pending_payment | paid | confirmed | completed | cancelled | refunded
+    price_paise: Mapped[int] = mapped_column(Integer)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime)
+    location_text: Mapped[str | None] = mapped_column(String(300))
+    notes: Mapped[str | None] = mapped_column(String(500))
+    contact_name: Mapped[str] = mapped_column(String(100))
+    contact_phone: Mapped[str] = mapped_column(String(20))
+    payment_id: Mapped[str | None] = mapped_column(String(36))        # payments.id
+    assigned_uid: Mapped[str | None] = mapped_column(String(128))
+    admin_note: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

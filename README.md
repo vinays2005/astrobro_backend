@@ -102,6 +102,34 @@ only the API key keep working, with a per-address limit.
 The detailed PDF report is included with any premium plan; otherwise one paid `report` order buys one report and is
 handed back if generating it fails.
 
+### Human astrologers, wallet and bookings (signed-in user)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/astrologers`, `/api/astrologers/{uid}` | Directory (language, specialty, mode, online, sort) and a profile with reviews |
+| POST | `/api/astrologer/apply` | Apply to become an astrologer; the owner approves |
+| GET/PUT | `/api/astrologer/me` | Own profile, status and earnings |
+| POST | `/api/astrologer/presence` | Go online or offline (also the heartbeat) |
+| GET | `/api/astrologer/requests?wait=20` | Waiting requests and the active consultation (long-poll) |
+| GET | `/api/astrologer/earnings` | Amount owed and the ledger |
+| POST | `/api/me/accept-terms` | 18+ and consultation terms, needed before the first consultation |
+| POST | `/api/consult/sessions` | Request a chat, call or video; the wallet must cover 5 minutes |
+| POST | `/api/consult/sessions/{id}/accept`, `/decline`, `/cancel`, `/end` | Lifecycle |
+| GET/POST | `/api/consult/sessions/{id}/messages` | Chat; GET takes `after` and `wait` (long-poll, ~instant delivery) |
+| POST | `/api/consult/sessions/{id}/review`, `/report` | Rate a consultation; report abuse |
+| GET | `/api/services`; POST `/api/bookings`; GET `/api/bookings` | Puja/pandit catalogue and bookings, paid through `/api/billing` |
+
+How the money works (all in one database transaction, locking session, astrologer, wallet in that order):
+a minute is charged to the user's wallet when it starts (minute 1 when the astrologer accepts); the astrologer earns
+the charge minus `PLATFORM_COMMISSION_PERCENT` (30%); a session ends when either side ends it, the wallet cannot pay
+the next minute, a chat sits idle for 10 minutes, it reaches 3 hours, or the astrologer stops checking in; a chat the
+astrologer never answered is refunded in full. Every ledger row has a unique reference, so repeating a step never
+charges twice. Phone numbers, emails and links are refused in chat (`BLOCK_CONTACT_SHARING`).
+
+The owner's tools are under `/api/admin/*` and need a signed-in user whose verified email is in `ADMIN_EMAILS`:
+approve or reject astrologers, record payouts (sent by hand by UPI or bank), correct wallets, block accounts, handle
+abuse reports, manage the service catalogue and bookings, and `GET /api/admin/summary` for the money picture.
+
 ### AI features (need `GROQ_API_KEY`)
 
 | Method | Path | Description |
@@ -145,8 +173,7 @@ currently English only.
 - **Love calculator, tarot and numerology** are for entertainment.
 - **Vastu** is traditional guidance, not structural or legal advice.
 
-The human marketplace (live chat, call and video with astrologers, puja booking, live sessions) is not part of
-this backend; `/api/features` lists it as `out_of_scope`.
+Free live-streamed sessions with astrologers are not built; `/api/features` lists them as `out_of_scope`.
 
 ## LLM limits
 

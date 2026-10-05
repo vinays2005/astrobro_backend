@@ -75,3 +75,8 @@ async def history(db: AsyncSession, uid: str, limit: int = 30) -> list[WalletEnt
         select(WalletEntry).where(WalletEntry.uid == uid).order_by(WalletEntry.id.desc()).limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def lock(db: AsyncSession, uid: str) -> Wallet:
+    """Lock the user's wallet row for the rest of the transaction (creating it if needed)."""
+    return await _locked_wallet(db, uid)

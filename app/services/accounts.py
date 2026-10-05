@@ -113,3 +113,11 @@ async def release_chat(db: AsyncSession, uid: str) -> None:
     if row is not None and row.chats > 0:
         row.chats -= 1
         await db.flush()
+
+
+async def accept_terms(db: AsyncSession, user: AuthUser) -> datetime:
+    """Record that the user confirmed they are 18+ and accepted the consultation terms."""
+    acct = await ensure_account(db, user)
+    if acct.terms_accepted_at is None:
+        acct.terms_accepted_at = utcnow()
+    return acct.terms_accepted_at
