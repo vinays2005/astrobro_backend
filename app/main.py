@@ -86,13 +86,16 @@ async def lifespan(app: FastAPI):
 
 
 SWEEP_SECONDS = 10.0
+PURGE_EVERY_SWEEPS = 6 * 3600 // int(SWEEP_SECONDS)       # registration records of deleted accounts: every 6 hours
 
 
 async def _sweep_consultations() -> None:
-    """Every few seconds: expire unanswered requests, bill running consultations, end dead ones."""
+    """Every few seconds: expire unanswered requests, bill running consultations, end dead ones.
+    Every few hours: drop the registration details of accounts deleted more than 180 days ago."""
     from app.database.connection import session_scope
-    from app.services import consult
+    from app.services import consult, erasure
 
+    passes = 0
     while True:
         await asyncio.sleep(SWEEP_SECONDS)
         try:
@@ -100,10 +103,16 @@ async def _sweep_consultations() -> None:
                 counts = await consult.sweep(db)
             if any(counts.values()):
                 logger.info("consult_sweep", **counts)
+            if passes % PURGE_EVERY_SWEEPS == 0:
+                async with session_scope() as db:
+                    purged = await erasure.purge_expired(db)
+                if purged:
+                    logger.info("account_deletions_purged", count=purged)
         except asyncio.CancelledError:
             raise
         except Exception as exc:                                  # one bad pass must never stop the loop
             logger.warning("consult_sweep_failed", error=str(exc))
+        passes += 1
 
 
 _ORCHESTRATOR_RETRY_SECONDS = 60.0

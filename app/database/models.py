@@ -10,6 +10,7 @@ Tables:
   wallets, wallet_entries — prepaid balance for consultations (every change has a ledger row)
   astrologers, consult_sessions, consult_messages, earnings_entries, reviews, abuse_reports — human consultations
   service_items, bookings — pandit and puja bookings
+  account_deletions — the minimum the IT Rules make us keep for 180 days after someone deletes their account
 """
 from __future__ import annotations
 
@@ -316,3 +317,15 @@ class Booking(Base):
     admin_note: Mapped[str | None] = mapped_column(String(300))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ── Account deletion ──────────────────────────────────────────────────────────
+
+class AccountDeletion(Base):
+    """Registration details kept after an account is deleted. Rule 3(1)(h) of the IT (Intermediary Guidelines) Rules,
+    2021 requires 180 days; app/services/erasure.purge_expired removes the row after that."""
+    __tablename__ = "account_deletions"
+
+    uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    email: Mapped[str | None] = mapped_column(String(255))
+    deleted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

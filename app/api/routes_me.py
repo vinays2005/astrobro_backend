@@ -8,7 +8,7 @@ from app.config import get_settings
 from app.database.connection import get_db
 from app.security.auth import require_api_key
 from app.security.identity import AuthUser, current_user
-from app.services import accounts, astrologers, wallet
+from app.services import accounts, astrologers, erasure, wallet
 from app.services import memory as chat_memory
 
 router = APIRouter(prefix="/api", tags=["me"], dependencies=[Depends(require_api_key)])
@@ -44,6 +44,13 @@ async def account_summary(db: AsyncSession, user: AuthUser) -> dict:
 @router.get("/me")
 async def me(user: AuthUser = Depends(current_user), db: AsyncSession = Depends(get_db)) -> dict:
     return await account_summary(db, user)
+
+
+@router.delete("/me")
+async def delete_me(user: AuthUser = Depends(current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    """Erase the caller's data before the app deletes their Firebase account. 409 (wallet_not_empty,
+    consult_in_progress, booking_in_progress, earnings_unpaid) while money or a service is still in flight."""
+    return await erasure.delete_account(db, user.uid, user.email)
 
 
 @router.post("/me/accept-terms")
