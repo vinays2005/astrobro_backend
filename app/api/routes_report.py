@@ -1,14 +1,10 @@
 """Report generation API — free & paid PDF kundali reports.
 
-Auto-approve mode (AUTO_APPROVE_PAYMENTS=True in config):
-  • Paid PDF is granted without payment verification.
-  • Once Razorpay keys are live, set AUTO_APPROVE_PAYMENTS=False in Railway env vars
-    to switch to real payment verification.
+The paid PDF is included with premium plans and otherwise sold per report through /api/billing.
+AUTO_APPROVE_PAYMENTS=True (development only) hands it out without any payment.
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import re
 from datetime import datetime
 
@@ -18,8 +14,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.database.connection import session_scope
 from app.security.auth import require_api_key
+from app.security.identity import AuthUser, ai_user
 from app.astrology.engine import AstrologyEngine
+from app.services import accounts, billing
 from app.services.pdf_generator import generate_report_pdf
 
 logger = structlog.get_logger()
@@ -188,36 +187,44 @@ def _parse_ai_sections(raw: str) -> dict[str, str]:
     response_class=Response,
     responses={200: {"content": {"application/pdf": {}}}},
 )
-async def generate_report(body: ReportRequest) -> Response:
+async def generate_report(body: ReportRequest, user: AuthUser | None = Depends(ai_user)) -> Response:
     """Generate a free or paid PDF kundali report.
 
-    Paid tier logic:
-      - If AUTO_APPROVE_PAYMENTS=True  → skip payment, generate PDF immediately.
-      - If AUTO_APPROVE_PAYMENTS=False → verify Razorpay signature first.
+    Paid tier: included with an active premium plan, otherwise it needs a paid report order (create one with
+    POST /api/billing/orders, purpose "report", then verify it) whose id is sent as razorpay_order_id. Each paid
+    order buys exactly one report and is handed back if the report cannot be produced.
+    AUTO_APPROVE_PAYMENTS=true skips the check (development only).
     """
+    spent_order = await _authorize_paid_report(body, user)
+    try:
+        return await _render_report(body)
+    except Exception:
+        if spent_order and user is not None:
+            try:
+                async with session_scope() as db:
+                    await billing.unconsume_report_payment(db, user.uid, spent_order)
+            except Exception as exc:
+                logger.error("report_refund_failed", order_id=spent_order, error=str(exc))
+        raise
+
+
+async def _authorize_paid_report(body: ReportRequest, user: AuthUser | None) -> str | None:
+    """Raise 402 unless the paid report is allowed. Returns the order id that was spent, if any."""
     settings = get_settings()
+    if body.tier != "paid" or settings.auto_approve_payments:
+        return None
+    if user is None:
+        raise HTTPException(status_code=402, detail="Sign in and purchase the report to continue.")
+    async with session_scope() as db:
+        await accounts.ensure_account(db, user)
+        if settings.report_free_for_premium and await accounts.is_premium(db, user.uid):
+            return None
+        if body.razorpay_order_id and await billing.consume_report_payment(db, user.uid, body.razorpay_order_id):
+            return body.razorpay_order_id
+    raise HTTPException(status_code=402, detail="Payment required")
 
-    # ── Payment gate ──────────────────────────────────────────────────────────
-    if body.tier == "paid":
-        if not settings.auto_approve_payments:
-            # Require valid Razorpay fields
-            if not body.razorpay_payment_id or not body.razorpay_order_id or not body.razorpay_signature:
-                raise HTTPException(status_code=402, detail="Payment required")
 
-            secret = settings.razorpay_key_secret
-            if not secret:
-                raise HTTPException(status_code=503, detail="Payment service not configured")
-
-            payload = f"{body.razorpay_order_id}|{body.razorpay_payment_id}"
-            expected = hmac.new(
-                secret.encode(),
-                payload.encode(),
-                hashlib.sha256,
-            ).hexdigest()
-
-            if not hmac.compare_digest(expected, body.razorpay_signature):
-                raise HTTPException(status_code=400, detail="Invalid payment signature")
-
+async def _render_report(body: ReportRequest) -> Response:
     # ── Calculate chart ───────────────────────────────────────────────────────
     try:
         engine = AstrologyEngine()

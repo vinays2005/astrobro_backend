@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     app_env: Literal["development", "staging", "production"] = "development"
     debug: bool = True
     secret_key: str = "change-me"
-    allowed_origins: list[str] = ["http://localhost:3000"]
+    allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
@@ -80,10 +80,34 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     api_key: str = ""  # X-API-Key header — empty = disabled (dev), set in prod
 
+    # Identity: Firebase Auth ID tokens (see app/security/identity.py)
+    firebase_project_id: str = "astro-bro-96380"
+    # False = also accept requests that carry only the API key (older app versions). Set REQUIRE_ID_TOKEN=true
+    # once the new app is out, so every AI route is metered and protected per signed-in user.
+    require_id_token: bool = False
+    # Owners who may use /api/admin/*. An email only counts when Firebase reports it as verified.
+    admin_emails: Annotated[list[str], NoDecode] = []
+    admin_uids: Annotated[list[str], NoDecode] = []
+
+    # Plans and limits (enforced on the server, not in the app)
+    free_chats_per_day: int = 10
+    premium_chats_per_day: int = 300
+    report_free_for_premium: bool = True        # premium plans include the detailed PDF report
+
+    # Wallet and consultations with human astrologers
+    wallet_min_topup_paise: int = 10000         # Rs 100
+    wallet_max_topup_paise: int = 500000        # Rs 5,000
+    platform_commission_percent: int = 30       # share of each consultation kept by the platform
+    consult_min_minutes: int = 5                # balance a user needs to start a session
+    consult_request_ttl_seconds: int = 120      # a request nobody accepts expires
+    consult_idle_timeout_seconds: int = 600     # a session with no messages for this long is closed
+    block_contact_sharing: bool = True          # reject phone numbers, emails and links in chats
+    razorpay_webhook_secret: str = ""           # enables POST /api/billing/webhook
+
     # Observability
     log_level: str = "INFO"
 
-    @field_validator("allowed_origins", mode="before")
+    @field_validator("allowed_origins", "admin_emails", "admin_uids", mode="before")
     @classmethod
     def parse_origins(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, list):

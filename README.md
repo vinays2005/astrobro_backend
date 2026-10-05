@@ -83,6 +83,25 @@ calculated, AI or human-delivered, a suggested free/premium tier and its endpoin
 | Notifications | `POST /api/notifications/feed` (the app schedules the push alerts from this feed) |
 | Languages | `GET /api/languages` |
 
+### Accounts and payments (signed-in user, Firebase ID token)
+
+The app sends `Authorization: Bearer <Firebase ID token>` next to the API key. The server checks the token against
+Google's public keys (no secret needed), so premium time, the daily chat allowance and wallet money are kept on the
+server and cannot be edited from the app. With `REQUIRE_ID_TOKEN=false` (the default) older app versions that send
+only the API key keep working, with a per-address limit.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/me` | Plan, premium expiry, chats used and left today, wallet balance |
+| GET | `/api/wallet` | Wallet balance and the last 30 ledger entries |
+| GET | `/api/billing/plans` | Plan prices and lengths, report price, top-up limits |
+| POST | `/api/billing/orders` | Start a Razorpay order for a `plan`, a one-off `report` or a `wallet` top-up |
+| POST | `/api/billing/verify` | Verify the payment signature and grant premium, wallet money or the report |
+| POST | `/api/billing/webhook` | Razorpay webhook (off until `RAZORPAY_WEBHOOK_SECRET` is set) |
+
+The detailed PDF report is included with any premium plan; otherwise one paid `report` order buys one report and is
+handed back if generating it fails.
+
 ### AI features (need `GROQ_API_KEY`)
 
 | Method | Path | Description |

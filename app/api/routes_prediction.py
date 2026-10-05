@@ -2,25 +2,28 @@
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
 from app.models.api import PredictionRequest
 from app.security.auth import require_api_key
+from app.security.identity import AuthUser, ai_user
+from app.services.metering import charge_ai_call, refund_ai_call
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/prediction", tags=["prediction"])
 
 
 @router.post("/", response_model=dict, dependencies=[Depends(require_api_key)])
-async def get_prediction(request: PredictionRequest) -> dict:
+async def get_prediction(request: PredictionRequest, http: Request, user: AuthUser | None = Depends(ai_user)) -> dict:
     """
     Full AI prediction for a specific life topic.
 
     Pipeline: birth_data → kundli → rules → RAG → LLM → verify → response
     """
     orchestrator = get_orchestrator()
+    meter = await charge_ai_call(user, http)
     try:
         result = await orchestrator.run(
             user_input=f"Give a detailed {request.topic} analysis for my chart",
@@ -29,6 +32,7 @@ async def get_prediction(request: PredictionRequest) -> dict:
             language=request.language,
         )
     except APIStatusError as exc:
+        await refund_ai_call(meter)
         # Provider rate/size limits: keep details (org id, quotas) server-side.
         logger.error("prediction_llm_error", status=exc.status_code, error=str(exc))
         raise HTTPException(
@@ -36,6 +40,7 @@ async def get_prediction(request: PredictionRequest) -> dict:
             detail="The AI service is busy right now. Please try again in a minute.",
         ) from exc
     except Exception as exc:
+        await refund_ai_call(meter)
         logger.error("prediction_failed", error=str(exc))
         raise HTTPException(
             status_code=500, detail="Prediction failed. Please try again."

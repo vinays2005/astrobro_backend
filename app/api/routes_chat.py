@@ -1,25 +1,31 @@
-"""AI chat routes — SSE streaming + regular response."""
+"""AI chat routes — SSE streaming + regular response.
+
+Every call is charged against the signed-in user's daily allowance on the server (app/services/metering.py), and
+given back if the AI fails, so the limit cannot be bypassed by editing the app."""
 from __future__ import annotations
 
 import json
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
 from app.models.api import ChatRequest, ChatResponse
 from app.security.auth import require_api_key
+from app.security.identity import AuthUser, ai_user
+from app.services.metering import charge_ai_call, refund_ai_call
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 @router.post("/", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
-async def chat(request: ChatRequest) -> dict:
+async def chat(request: ChatRequest, http: Request, user: AuthUser | None = Depends(ai_user)) -> dict:
     """Single-turn AI astrology chat."""
     orchestrator = get_orchestrator()
+    meter = await charge_ai_call(user, http)
     try:
         return await orchestrator.run(
             user_input=request.question,
@@ -29,16 +35,20 @@ async def chat(request: ChatRequest) -> dict:
             language=request.language,
         )
     except APIStatusError as exc:
+        await refund_ai_call(meter)
         # Provider rate/size limits: keep details (org id, quotas) server-side.
         logger.error("chat_llm_error", status=exc.status_code, error=str(exc))
         raise HTTPException(
             status_code=503,
             detail="The AI service is busy right now. Please try again in a minute.",
         ) from exc
+    except Exception:
+        await refund_ai_call(meter)
+        raise
 
 
 @router.post("/stream", dependencies=[Depends(require_api_key)])
-async def chat_stream(request: ChatRequest) -> StreamingResponse:
+async def chat_stream(request: ChatRequest, http: Request, user: AuthUser | None = Depends(ai_user)) -> StreamingResponse:
     """
     Streaming AI astrology chat — true SSE token stream from Groq.
 
@@ -47,6 +57,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     and only then fake-streamed words — causing 499 client timeouts.
     """
     orchestrator = get_orchestrator()
+    meter = await charge_ai_call(user, http)
 
     async def event_generator():
         import uuid as _uuid
@@ -76,6 +87,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
         except Exception as exc:
             logger.error("chat_stream_failed", request_id=request_id, error=str(exc))
+            await refund_ai_call(meter)
             message = (
                 "The AI service is busy right now. Please try again in a minute."
                 if isinstance(exc, APIStatusError)

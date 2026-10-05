@@ -30,6 +30,8 @@ from app.api.routes_vastu import router as vastu_router
 from app.api.routes_muhurat import router as muhurat_router
 from app.api.routes_calendar import router as calendar_router
 from app.api.routes_assistant import router as assistant_router
+from app.api.routes_billing import router as billing_router, webhook_router as billing_webhook_router
+from app.api.routes_me import router as me_router
 from app.database.connection import init_db
 
 logger = structlog.get_logger()
@@ -172,7 +174,7 @@ def create_app() -> FastAPI:
     app.include_router(panchang_router)
     for r in (horoscope_router, transit_router, dasha_router, dosha_router, remedies_router, match_router,
               love_router, numerology_router, tarot_router, vastu_router, muhurat_router, calendar_router,
-              assistant_router):
+              assistant_router, billing_router, billing_webhook_router, me_router):
         app.include_router(r)
 
     @app.get("/")

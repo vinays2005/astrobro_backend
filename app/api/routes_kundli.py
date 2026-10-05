@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
 from app.astrology.engine import AstrologyEngine
@@ -18,6 +19,8 @@ from app.models.api import (
 )
 from app.config import get_settings
 from app.security.auth import require_api_key
+from app.security.identity import AuthUser, ai_user
+from app.services.metering import charge_ai_call, refund_ai_call
 
 router = APIRouter(prefix="/api/kundli", tags=["kundli"])
 _settings = get_settings()
@@ -124,13 +127,20 @@ async def match_kundli(request: KundliMatchRequest) -> dict:
 
 
 @router.post("/predict", response_model=PredictionResponse, dependencies=[Depends(require_api_key)])
-async def predict(request: PredictionRequest) -> dict:
+async def predict(request: PredictionRequest, http: Request, user: AuthUser | None = Depends(ai_user)) -> dict:
     """Full AI prediction pipeline for a topic."""
     orchestrator = get_orchestrator()
-    result = await orchestrator.run(
-        user_input=f"Give me a detailed {request.topic} analysis",
-        birth_data=request.birth_data.model_dump(),
-        topic_hint=request.topic,
-        language=request.language,
-    )
-    return result
+    meter = await charge_ai_call(user, http)
+    try:
+        return await orchestrator.run(
+            user_input=f"Give me a detailed {request.topic} analysis",
+            birth_data=request.birth_data.model_dump(),
+            topic_hint=request.topic,
+            language=request.language,
+        )
+    except APIStatusError as exc:
+        await refund_ai_call(meter)
+        raise HTTPException(status_code=503, detail="The AI service is busy right now. Please try again in a minute.") from exc
+    except Exception:
+        await refund_ai_call(meter)
+        raise
