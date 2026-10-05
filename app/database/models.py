@@ -5,6 +5,7 @@ Tables:
   users    — registered users (original, unused by the routes)
   kundlis  — saved birth charts (one user can have many)
   chats    — conversation history per kundli
+  chat_memories — short notes of what a signed-in user asked in earlier chats (their own, deletable)
   accounts, entitlements, usage_daily, payments — who is calling, what they have paid for and used
   wallets, wallet_entries — prepaid balance for consultations (every change has a ledger row)
   astrologers, consult_sessions, consult_messages, earnings_entries, reviews, abuse_reports — human consultations
@@ -93,6 +94,18 @@ class Account(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime)   # 18+ and consultation terms
+
+
+class ChatMemory(Base):
+    """What a user asked in an earlier chat and the gist of the answer, so the AI can continue where they left off.
+    Only the user's own question and one sentence of the reply are kept; the user can list and delete them."""
+    __tablename__ = "chat_memories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    uid: Mapped[str] = mapped_column(String(128), index=True)
+    question: Mapped[str] = mapped_column(String(200))
+    gist: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class Entitlement(Base):

@@ -71,7 +71,7 @@ def test_a_failure_in_the_engine_never_breaks_the_chat(chart, monkeypatch):
 
 
 def test_both_prompts_carry_the_block_and_format_without_it():
-    kwargs = dict(chart_json="c", dasha_json="d", evidence_json="e", history_json="[]", question="q")
+    kwargs = dict(chart_json="c", dasha_json="d", evidence_json="e", history_json="[]", question="q", memory_block="")
     for template in (CHAT_PROMPT, CHAT_STREAM_PROMPT):
         with_facts = template.format(**kwargs, facts_block=facts_block("Doshas: none"))
         without = template.format(**kwargs, facts_block="")

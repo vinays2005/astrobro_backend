@@ -1,7 +1,7 @@
 """The signed-in user's own account: plan, today's AI allowance and wallet."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -9,6 +9,7 @@ from app.database.connection import get_db
 from app.security.auth import require_api_key
 from app.security.identity import AuthUser, current_user
 from app.services import accounts, astrologers, wallet
+from app.services import memory as chat_memory
 
 router = APIRouter(prefix="/api", tags=["me"], dependencies=[Depends(require_api_key)])
 
@@ -50,6 +51,27 @@ async def accept_terms(user: AuthUser = Depends(current_user), db: AsyncSession 
     """The user confirms they are 18+ and accepts the consultation terms (needed before the first consultation)."""
     await accounts.accept_terms(db, user)
     return await account_summary(db, user)
+
+
+@router.get("/me/memories")
+async def my_memories(user: AuthUser = Depends(current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    """Everything the AI remembers about this user's earlier chats."""
+    items = await chat_memory.list_memories(db, user.uid)
+    return {"memories": [{"id": m.id, "question": m.question, "gist": m.gist, "created_at": _iso(m.created_at)} for m in items]}
+
+
+@router.delete("/me/memories")
+async def forget_all_memories(user: AuthUser = Depends(current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    """Forget everything."""
+    return {"deleted": await chat_memory.forget(db, user.uid)}
+
+
+@router.delete("/me/memories/{memory_id}")
+async def forget_one_memory(memory_id: str, user: AuthUser = Depends(current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    deleted = await chat_memory.forget(db, user.uid, memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="That memory was not found.")
+    return {"deleted": deleted}
 
 
 @router.get("/wallet")

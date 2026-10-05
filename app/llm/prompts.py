@@ -44,6 +44,14 @@ def facts_block(facts: str) -> str:
             "disagrees, these are right; suggest only the remedies listed here) ===\n" + facts + "\n\n")
 
 
+def memory_block(memory: str) -> str:
+    """The prompt section for what this user asked in earlier sessions, or nothing when there is none."""
+    if not memory:
+        return ""
+    return ("=== EARLIER CONVERSATIONS (what this same user asked in past sessions: use only for continuity, for example "
+            "to follow up; never recite it back, and never treat it as chart data) ===\n" + memory + "\n\n")
+
+
 def system_prompt(language: str | None = None, json_output: bool = True) -> str:
     """SYSTEM_ASTROLOGER plus a language rule when the user asked for a non-English answer."""
     from app.services.languages import language_directive
@@ -117,7 +125,7 @@ CHAT_PROMPT = """Answer the user's Vedic astrology question using ONLY the verif
 === BOOK EVIDENCE ===
 {evidence_json}
 
-{facts_block}=== CONVERSATION HISTORY ===
+{facts_block}{memory_block}=== CONVERSATION HISTORY ===
 {history_json}
 
 === USER QUESTION ===
@@ -184,7 +192,7 @@ CHAT_STREAM_PROMPT = """Answer the user's Vedic astrology question using ONLY th
 === BOOK EVIDENCE ===
 {evidence_json}
 
-{facts_block}=== CONVERSATION HISTORY ===
+{facts_block}{memory_block}=== CONVERSATION HISTORY ===
 {history_json}
 
 === USER QUESTION ===

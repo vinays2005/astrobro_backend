@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     llm_fallback3_api_key: str = ""
     llm_fallback3_model: str = ""
 
+    # Episodic memory: signed-in users' earlier questions are recalled in new chats (see app/services/memory.py)
+    chat_memory_enabled: bool = True
+
     # Razorpay
     razorpay_key_id: str = ""      # rzp_test_... or rzp_live_...
     razorpay_key_secret: str = ""  # from Razorpay dashboard

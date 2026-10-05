@@ -16,6 +16,9 @@ from app.llm.provider import LLMBusyError
 from app.models.api import ChatRequest, ChatResponse
 from app.security.auth import require_api_key
 from app.security.identity import AuthUser, ai_user
+from app.config import get_settings
+from app.database.connection import session_scope
+from app.services import memory as chat_memory
 from app.services.metering import charge_ai_call, refund_ai_call
 
 logger = structlog.get_logger()
@@ -48,6 +51,24 @@ async def chat(request: ChatRequest, http: Request, user: AuthUser | None = Depe
         raise
 
 
+async def _recall(uid: str, question: str) -> str:
+    """Earlier-session notes for this user. Memory is a bonus: a failure here must never stop the chat."""
+    try:
+        async with session_scope() as db:
+            return await chat_memory.recall(db, uid, question)
+    except Exception as exc:
+        logger.warning("memory_recall_failed", error=str(exc))
+        return ""
+
+
+async def _remember(uid: str, question: str, answer: str) -> None:
+    try:
+        async with session_scope() as db:
+            await chat_memory.remember(db, uid, question, answer)
+    except Exception as exc:
+        logger.warning("memory_save_failed", error=str(exc))
+
+
 @router.post("/stream", dependencies=[Depends(require_api_key)])
 async def chat_stream(request: ChatRequest, http: Request, user: AuthUser | None = Depends(ai_user)) -> StreamingResponse:
     """
@@ -59,6 +80,8 @@ async def chat_stream(request: ChatRequest, http: Request, user: AuthUser | None
     """
     orchestrator = get_orchestrator()
     meter = await charge_ai_call(user, http)
+    use_memory = user is not None and request.use_memory and get_settings().chat_memory_enabled
+    remembered = await _recall(user.uid, request.question) if use_memory else ""
 
     async def event_generator():
         import uuid as _uuid
@@ -72,6 +95,7 @@ async def chat_stream(request: ChatRequest, http: Request, user: AuthUser | None
                 birth_data=request.birth_data.model_dump() if request.birth_data else None,
                 conversation_history=request.conversation_history,
                 language=request.language,
+                memory=remembered,
             ):
                 full_text += token
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
@@ -84,6 +108,8 @@ async def chat_stream(request: ChatRequest, http: Request, user: AuthUser | None
                 "answer": full_text,
                 "full": {"answer": full_text, "topic": "general", "follow_up_questions": []},
             }
+            if use_memory:     # before "done": the app may close the connection as soon as it sees that event
+                await _remember(user.uid, request.question, full_text)
             yield f"data: {json.dumps(done_payload)}\n\n"
 
         except Exception as exc:

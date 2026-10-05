@@ -25,6 +25,7 @@ from app.llm.prompts import (
     CHAT_PROMPT,
     CHAT_STREAM_PROMPT,
     facts_block,
+    memory_block,
     PREDICTION_PROMPT,
     SYSTEM_ASTROLOGER,
     system_prompt,
@@ -346,6 +347,7 @@ class AgentOrchestrator:
             history_json=_history_json(history),
             question=state.user_input,
             facts_block=facts_block(verified_facts(state.user_input, chart)),
+            memory_block="",
         )
 
         # json_mode=True — chat response also expects structured JSON
@@ -377,6 +379,7 @@ class AgentOrchestrator:
         birth_data: dict | None = None,
         conversation_history: list[dict] | None = None,
         language: str | None = None,
+        memory: str = "",
     ):
         """
         Streaming chat pipeline — yields raw LLM tokens as they arrive.
@@ -422,6 +425,7 @@ class AgentOrchestrator:
             history_json=_history_json(history),
             question=user_input,
             facts_block=facts_block(verified_facts(user_input, chart)),
+            memory_block=memory_block(memory),
         )
 
         async for token in self._llm.generate_stream(

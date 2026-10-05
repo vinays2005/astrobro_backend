@@ -57,6 +57,7 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     conversation_history: list[dict] = Field(default_factory=list)
     language: str = Field(default="english")
+    use_memory: bool = True            # the app's "remember my earlier chats" switch; off = nothing recalled or saved
 
 
 class BookIngestRequest(BaseModel):
