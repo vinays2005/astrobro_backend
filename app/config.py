@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     # Long-form PDF sections need ~3k output tokens; qwen's on-demand OTPM cap is 1000.
     groq_report_model: str = "openai/gpt-oss-120b"
     groq_stt_model: str = "whisper-large-v3-turbo"
+    # Groq limits tokens per minute PER MODEL, so a rate-limited chat moves to the next model in this list at once.
+    # Set GROQ_FALLBACK_MODELS to a comma-separated list, or leave it empty to use only GROQ_MODEL.
+    groq_fallback_models: Annotated[list[str], NoDecode] = ["openai/gpt-oss-20b"]
+    # Optional second provider for when every Groq model is busy: any OpenAI-compatible endpoint, for example
+    # Cerebras (https://api.cerebras.ai/v1) or Gemini (https://generativelanguage.googleapis.com/v1beta/openai).
+    llm_fallback_base_url: str = ""
+    llm_fallback_api_key: str = ""
+    llm_fallback_model: str = ""
 
     # Razorpay
     razorpay_key_id: str = ""      # rzp_test_... or rzp_live_...
@@ -107,7 +115,7 @@ class Settings(BaseSettings):
     # Observability
     log_level: str = "INFO"
 
-    @field_validator("allowed_origins", "admin_emails", "admin_uids", mode="before")
+    @field_validator("allowed_origins", "admin_emails", "admin_uids", "groq_fallback_models", mode="before")
     @classmethod
     def parse_origins(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, list):

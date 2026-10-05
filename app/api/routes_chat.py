@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
+from app.llm.provider import LLMBusyError
 from app.models.api import ChatRequest, ChatResponse
 from app.security.auth import require_api_key
 from app.security.identity import AuthUser, ai_user
@@ -34,10 +35,10 @@ async def chat(request: ChatRequest, http: Request, user: AuthUser | None = Depe
             force_chat=True,
             language=request.language,
         )
-    except APIStatusError as exc:
+    except (APIStatusError, LLMBusyError) as exc:
         await refund_ai_call(meter)
         # Provider rate/size limits: keep details (org id, quotas) server-side.
-        logger.error("chat_llm_error", status=exc.status_code, error=str(exc))
+        logger.error("chat_llm_error", status=getattr(exc, "status_code", None), error=str(exc))
         raise HTTPException(
             status_code=503,
             detail="The AI service is busy right now. Please try again in a minute.",
@@ -90,7 +91,7 @@ async def chat_stream(request: ChatRequest, http: Request, user: AuthUser | None
             await refund_ai_call(meter)
             message = (
                 "The AI service is busy right now. Please try again in a minute."
-                if isinstance(exc, APIStatusError)
+                if isinstance(exc, (APIStatusError, LLMBusyError))
                 else "Something went wrong. Please try again."
             )
             yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"

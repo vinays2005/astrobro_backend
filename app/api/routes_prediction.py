@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
+from app.llm.provider import LLMBusyError
 from app.models.api import PredictionRequest
 from app.security.auth import require_api_key
 from app.security.identity import AuthUser, ai_user
@@ -31,10 +32,10 @@ async def get_prediction(request: PredictionRequest, http: Request, user: AuthUs
             topic_hint=request.topic,
             language=request.language,
         )
-    except APIStatusError as exc:
+    except (APIStatusError, LLMBusyError) as exc:
         await refund_ai_call(meter)
         # Provider rate/size limits: keep details (org id, quotas) server-side.
-        logger.error("prediction_llm_error", status=exc.status_code, error=str(exc))
+        logger.error("prediction_llm_error", status=getattr(exc, "status_code", None), error=str(exc))
         raise HTTPException(
             status_code=503,
             detail="The AI service is busy right now. Please try again in a minute.",

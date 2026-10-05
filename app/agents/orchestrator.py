@@ -19,7 +19,8 @@ from typing import Literal
 from app.agents.state import AstrologyState
 from app.astrology.engine import AstrologyEngine, Chart
 from app.config import get_settings
-from app.llm.provider import GroqProvider, LLMProvider
+from app.llm.chart_text import chart_to_text, dasha_to_text
+from app.llm.provider import LLMProvider, build_provider
 from app.llm.prompts import (
     CHAT_PROMPT,
     CHAT_STREAM_PROMPT,
@@ -34,6 +35,20 @@ from app.rules.engine import RuleEngine
 from app.security.sanitization import wrap_evidence_list
 
 QueryType = Literal["topic_analysis", "simple_factual", "chat"]
+
+_HISTORY_TURNS = 4          # earlier messages sent along with a question
+_HISTORY_CHARS = 500        # an earlier answer is cut to this many characters
+
+
+def _compact_json(value: object) -> str:
+    """JSON without indentation, and Devanagari etc. left as text (escaped, each letter costs several tokens)."""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _history_json(history: list[dict] | None) -> str:
+    turns = [{"role": m.get("role"), "content": str(m.get("content", ""))[:_HISTORY_CHARS]}
+             for m in (history or [])[-_HISTORY_TURNS:]]
+    return _compact_json(turns)
 
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
     "marriage":     ["marriage", "marry", "spouse", "wedding", "partner", "relationship",
@@ -76,13 +91,7 @@ class AgentOrchestrator:
         # is Groq-specific.
         _s = get_settings()
         self._engine = engine or AstrologyEngine()
-        self._llm = llm or GroqProvider(
-            api_key=_s.groq_api_key or os.environ.get("GROQ_API_KEY"),
-            llm_model=_s.groq_model or os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
-            classifier_model=_s.groq_classifier_model or os.environ.get(
-                "GROQ_CLASSIFIER_MODEL", "qwen/qwen3.8-27b"
-            ),
-        )
+        self._llm = llm or build_provider(_s)
         self._retriever = retriever or HybridRetriever(
             embedding_model=f"sentence-transformers/{_s.embedding_model}" if "/" not in _s.embedding_model else _s.embedding_model,
             qdrant_url=_s.qdrant_url,
@@ -207,9 +216,9 @@ class AgentOrchestrator:
                 "score": chunk.score,
             })
 
-        chart_json = json.dumps(state.chart or {}, indent=2, default=str)
-        dasha_json = json.dumps(state.dasha or {}, indent=2, default=str)
-        rules_json = json.dumps(state.rule_results, indent=2, default=str)
+        chart_json = chart_to_text(state.chart)
+        dasha_json = dasha_to_text(state.dasha)
+        rules_json = _compact_json(state.rule_results)
         evidence_wrapped = wrap_evidence_list(state.retrieved_evidence)
 
         prompt = PREDICTION_PROMPT.format(
@@ -235,7 +244,7 @@ class AgentOrchestrator:
             interpretation = {}
 
         verify_prompt = VERIFICATION_PROMPT.format(
-            interpretation_json=json.dumps(interpretation, indent=2),
+            interpretation_json=_compact_json(interpretation),
             chart_json=chart_json,
             dasha_json=dasha_json,
             rules_json=rules_json,
@@ -302,15 +311,15 @@ class AgentOrchestrator:
                 "metadata": chunk.metadata,
             })
 
-        chart_json = json.dumps(state.chart or {}, indent=2, default=str)
-        dasha_json = json.dumps(state.dasha or {}, indent=2, default=str)
+        chart_json = chart_to_text(state.chart)
+        dasha_json = dasha_to_text(state.dasha)
         evidence_wrapped = wrap_evidence_list(state.retrieved_evidence)
 
         prompt = CHAT_PROMPT.format(
             chart_json=chart_json,
             dasha_json=dasha_json,
             evidence_json=evidence_wrapped,
-            history_json=json.dumps(history[-4:], indent=2),
+            history_json=_history_json(history),
             question=state.user_input,
         )
 
@@ -375,16 +384,16 @@ class AgentOrchestrator:
         except Exception:
             evidence_list = []
 
-        chart_json = json.dumps(chart_dict, indent=2, default=str)
-        dasha_json = json.dumps(dasha, indent=2, default=str)
+        chart_json = chart_to_text(chart_dict)
+        dasha_json = dasha_to_text(dasha)
         evidence_wrapped = wrap_evidence_list(evidence_list)
-        history = (conversation_history or [])[-4:]
+        history = conversation_history or []
 
         prompt = CHAT_STREAM_PROMPT.format(
             chart_json=chart_json,
             dasha_json=dasha_json,
             evidence_json=evidence_wrapped,
-            history_json=json.dumps(history, indent=2),
+            history_json=_history_json(history),
             question=user_input,
         )
 

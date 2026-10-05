@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from groq import APIStatusError
 
 from app.agents.singleton import get_orchestrator
+from app.llm.provider import LLMBusyError
 from app.astrology.engine import AstrologyEngine
 from app.models.api import (
     KundliMatchRequest,
@@ -138,7 +139,7 @@ async def predict(request: PredictionRequest, http: Request, user: AuthUser | No
             topic_hint=request.topic,
             language=request.language,
         )
-    except APIStatusError as exc:
+    except (APIStatusError, LLMBusyError) as exc:
         await refund_ai_call(meter)
         raise HTTPException(status_code=503, detail="The AI service is busy right now. Please try again in a minute.") from exc
     except Exception:

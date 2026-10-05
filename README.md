@@ -150,9 +150,18 @@ this backend; `/api/features` lists it as `out_of_scope`.
 
 ## LLM limits
 
-On Groq's free tier a chat answer uses about 4,000 prompt tokens against an 8,000 tokens-per-minute budget, so
-only about two chats per minute can be served across all users, and the large prediction prompts do not fit.
-Calculated endpoints are unaffected. Move to a paid Groq tier before real traffic.
+Groq's free tier limits tokens per minute for each model separately (8,000 for qwen and each gpt-oss model), and a
+chat prompt is about 2,100 tokens. The provider keeps a pool of models (`GROQ_MODEL` then `GROQ_FALLBACK_MODELS`):
+a rate-limited call moves to the next model at once, and the limited model is skipped for its cool-down. Measured
+live, six simultaneous chats all finished in about a second. That is roughly 6 to 7 chats a minute and 2,000 a day on
+the free tier (before: about 2 a minute). Calculated endpoints are not affected.
+
+For more, set `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_API_KEY` and `LLM_FALLBACK_MODEL` to any OpenAI-compatible
+provider; it answers only when every Groq model is busy. When nothing can answer, AI routes return 503 and the
+user's chat is given back.
+
+The chart and dasha are sent to the model as compact text (`app/llm/chart_text.py`) instead of pretty-printed
+JSON, which halved the prompt (4,100 to 2,100 tokens) without dropping any fact.
 
 ## Knowledge base (RAG)
 
