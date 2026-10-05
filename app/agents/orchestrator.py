@@ -24,11 +24,13 @@ from app.llm.provider import LLMProvider, build_provider
 from app.llm.prompts import (
     CHAT_PROMPT,
     CHAT_STREAM_PROMPT,
+    facts_block,
     PREDICTION_PROMPT,
     SYSTEM_ASTROLOGER,
     system_prompt,
     VERIFICATION_PROMPT,
 )
+from app.llm.facts import verified_facts
 from app.rag.retrieval import HybridRetriever
 from app.rag.scope import scope_for
 from app.rules.engine import RuleEngine
@@ -343,6 +345,7 @@ class AgentOrchestrator:
             evidence_json=evidence_wrapped,
             history_json=_history_json(history),
             question=state.user_input,
+            facts_block=facts_block(verified_facts(state.user_input, chart)),
         )
 
         # json_mode=True — chat response also expects structured JSON
@@ -385,6 +388,7 @@ class AgentOrchestrator:
         """
         chart_dict: dict = {}
         dasha: dict = {}
+        chart = None
         if birth_data:
             try:
                 chart = self._engine.calculate_chart(
@@ -417,6 +421,7 @@ class AgentOrchestrator:
             evidence_json=evidence_wrapped,
             history_json=_history_json(history),
             question=user_input,
+            facts_block=facts_block(verified_facts(user_input, chart)),
         )
 
         async for token in self._llm.generate_stream(

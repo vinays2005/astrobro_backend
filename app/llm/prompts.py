@@ -36,6 +36,14 @@ CRITICAL RULES:
 _JSON_RULE = "6. Always return valid JSON in the exact schema requested — no markdown fences around it."
 
 
+def facts_block(facts: str) -> str:
+    """The prompt section for calculated facts, or nothing when the question needs none."""
+    if not facts:
+        return ""
+    return ("=== CALCULATED FACTS (computed by the engine for this chart: quote them exactly; if your own reasoning "
+            "disagrees, these are right; suggest only the remedies listed here) ===\n" + facts + "\n\n")
+
+
 def system_prompt(language: str | None = None, json_output: bool = True) -> str:
     """SYSTEM_ASTROLOGER plus a language rule when the user asked for a non-English answer."""
     from app.services.languages import language_directive
@@ -109,7 +117,7 @@ CHAT_PROMPT = """Answer the user's Vedic astrology question using ONLY the verif
 === BOOK EVIDENCE ===
 {evidence_json}
 
-=== CONVERSATION HISTORY ===
+{facts_block}=== CONVERSATION HISTORY ===
 {history_json}
 
 === USER QUESTION ===
@@ -176,7 +184,7 @@ CHAT_STREAM_PROMPT = """Answer the user's Vedic astrology question using ONLY th
 === BOOK EVIDENCE ===
 {evidence_json}
 
-=== CONVERSATION HISTORY ===
+{facts_block}=== CONVERSATION HISTORY ===
 {history_json}
 
 === USER QUESTION ===
@@ -184,7 +192,7 @@ CHAT_STREAM_PROMPT = """Answer the user's Vedic astrology question using ONLY th
 
 Write a conversational answer in 3-6 sentences. Plain text only — no JSON, no markdown, no bullet points.
 Speak directly to the user about what their chart indicates.
-If the question relates to a challenge, weakness, or dosha in the chart, add 1-2 sentences at the end suggesting a specific Vedic remedy (gemstone, mantra, or simple upaya) classically recommended for that placement.
+If the question relates to a challenge, weakness, or dosha in the chart, add 1-2 sentences at the end suggesting a Vedic remedy (gemstone, mantra, or simple upaya). Name only a remedy that appears in CALCULATED FACTS or BOOK EVIDENCE; never invent a mantra, gemstone or ritual. Do not state a rule of astrology that the data above does not support.
 For detailed personalised remedies, mention: "Your Premium PDF report includes a full Jyotish remedies section."
 """
 
