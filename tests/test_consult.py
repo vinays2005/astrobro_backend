@@ -411,6 +411,40 @@ class TestSweep:
         assert out.status == "ended" and out.end_reason == "astrologer_offline" and out.refunded_paise == out.charged_paise > 0
         assert await balance(client.uid) == 20_000
 
+    async def test_an_astrologer_reading_the_chat_counts_as_present(self):
+        """They are in the room, not on the dashboard: their polling alone must keep the consultation alive."""
+        client, astro = await make_client(), await make_astrologer(now=T0)
+        s = await start_and_accept(client, astro)
+        for k in range(1, 6):
+            async with session_scope() as db:
+                await consult.messages_after(db, astro.uid, s.id, 0, now=at(seconds=k * 60))
+        out_time = at(seconds=5 * 60 + 10)
+        assert 5 * 60 + 10 > consult.ASTROLOGER_SILENCE_SECONDS
+        await self.run(out_time)
+        assert (await get_session(s.id)).status == "active"
+
+    async def test_an_astrologer_who_went_offline_but_is_still_chatting_is_not_dropped(self):
+        client, astro = await make_client(), await make_astrologer(now=T0)
+        s = await start_and_accept(client, astro)
+        async with session_scope() as db:
+            await astrologers.set_presence(db, astro.uid, False, at(10))
+        for k in range(1, 6):
+            async with session_scope() as db:
+                await consult.messages_after(db, astro.uid, s.id, 0, now=at(seconds=10 + k * 60))
+        await self.run(at(seconds=5 * 60 + 20))
+        assert (await get_session(s.id)).status == "active"
+        async with session_scope() as db:
+            assert (await db.get(Astrologer, astro.uid)).is_online is False        # still not offered to new clients
+
+    async def test_the_clients_polling_does_not_keep_a_silent_astrologer_alive(self):
+        client, astro = await make_client(), await make_astrologer(now=T0)
+        s = await start_and_accept(client, astro)
+        for k in range(1, 5):
+            async with session_scope() as db:
+                await consult.messages_after(db, client.uid, s.id, 0, now=at(seconds=k * 60))
+        await self.run(at(seconds=consult.ASTROLOGER_SILENCE_SECONDS + 30))
+        assert (await get_session(s.id)).end_reason == "astrologer_offline"
+
     async def test_quiet_astrologers_are_marked_offline(self):
         astro = await make_astrologer(now=T0)
         await self.run(at(astrologers.PRESENCE_TTL_SECONDS + 1))

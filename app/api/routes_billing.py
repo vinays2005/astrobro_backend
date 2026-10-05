@@ -48,6 +48,8 @@ async def plans() -> dict:
         "report_price_paise": s.paid_report_price,
         "report_free_for_premium": s.report_free_for_premium,
         "wallet": {"min_topup_paise": s.wallet_min_topup_paise, "max_topup_paise": s.wallet_max_topup_paise},
+        "consultations": {"commission_percent": s.platform_commission_percent, "min_minutes": s.consult_min_minutes,
+                          "request_seconds": s.consult_request_ttl_seconds},
     }
 
 

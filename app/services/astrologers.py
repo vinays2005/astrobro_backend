@@ -149,10 +149,14 @@ async def set_presence(db: AsyncSession, uid: str, online: bool, now: datetime |
     return a
 
 
-async def touch(db: AsyncSession, uid: str, now: datetime | None = None) -> None:
-    """An astrologer polling for requests is present: keep them online without a separate heartbeat call."""
+async def touch(db: AsyncSession, uid: str, now: datetime | None = None, *, even_if_offline: bool = False) -> None:
+    """An astrologer polling for requests is present: keep them online without a separate heartbeat call.
+
+    `even_if_offline` is for an astrologer who switched themselves offline to stop new requests but is still
+    talking to someone: their last-seen time is kept fresh so that consultation is not ended as abandoned, while
+    they stay out of the online list."""
     a = await get(db, uid)
-    if a is not None and a.status == "approved" and a.is_online:
+    if a is not None and a.status == "approved" and (a.is_online or even_if_offline):
         a.last_seen_at = now or utcnow()
 
 

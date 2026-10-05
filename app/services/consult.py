@@ -358,10 +358,16 @@ async def send_message(db: AsyncSession, uid: str, session_id: str, body: str, n
     return msg
 
 
-async def messages_after(db: AsyncSession, uid: str, session_id: str, after_id: int = 0, limit: int = 100) -> tuple[list[dict], dict]:
-    """New messages plus the session's current state (so a poll also learns that the session ended)."""
-    now = utcnow()
+async def messages_after(db: AsyncSession, uid: str, session_id: str, after_id: int = 0, limit: int = 100,
+                         now: datetime | None = None) -> tuple[list[dict], dict]:
+    """New messages plus the session's current state (so a poll also learns that the session ended).
+
+    An astrologer reading their open chat is present, so the poll also keeps their presence fresh: a consultation
+    must not be ended as abandoned just because they are in the room and not on the dashboard."""
+    now = now or utcnow()
     s, role = await _participant_session(db, uid, session_id)
+    if role == "astrologer" and s.status == "active":
+        await astrologers.touch(db, uid, now, even_if_offline=True)
     rows = (await db.execute(select(ConsultMessage).where(
         ConsultMessage.session_id == session_id, ConsultMessage.id > after_id)
         .order_by(ConsultMessage.id).limit(limit))).scalars().all()
