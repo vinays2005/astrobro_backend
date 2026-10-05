@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     llm_fallback_base_url: str = ""
     llm_fallback_api_key: str = ""
     llm_fallback_model: str = ""
+    # More backups, tried in order after the first: LLM_FALLBACK2_* and LLM_FALLBACK3_* (for example NVIDIA NIM,
+    # https://integrate.api.nvidia.com/v1, and OpenRouter, https://openrouter.ai/api/v1). Each needs all three values.
+    llm_fallback2_base_url: str = ""
+    llm_fallback2_api_key: str = ""
+    llm_fallback2_model: str = ""
+    llm_fallback3_base_url: str = ""
+    llm_fallback3_api_key: str = ""
+    llm_fallback3_model: str = ""
 
     # Razorpay
     razorpay_key_id: str = ""      # rzp_test_... or rzp_live_...

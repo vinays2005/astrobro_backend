@@ -24,6 +24,7 @@ logger = structlog.get_logger()
 DEFAULT_COOLDOWN = 20.0          # seconds a rate-limited model is skipped when the provider gives no hint
 MAX_COOLDOWN = 90.0
 MAX_WAIT_FOR_MODEL = 6.0         # how long we will wait once for the soonest model to free up
+BACKUP_TIMEOUT = 25.0            # a backup that has not answered in this long is treated as busy
 GONE_COOLDOWN = 600.0            # a model that no longer exists is not asked again for ten minutes
 
 
@@ -322,19 +323,68 @@ class OpenAICompatibleProvider(LLMProvider):
 
 
 class FallbackProvider(LLMProvider):
-    """Use the secondary provider whenever the primary reports LLMBusyError."""
+    """Ask the primary first; when it reports LLMBusyError, try each backup in order.
 
-    def __init__(self, primary: LLMProvider, secondary: LLMProvider) -> None:
+    A backup that just failed is skipped for BACKUP_COOLDOWN seconds, so a slow or used-up free tier does not add
+    its delay to every chat. The primary is always asked first (Groq keeps its own per-model cool-downs).
+    A stream switches provider only before its first token, never in the middle of an answer.
+    """
+
+    BACKUP_COOLDOWN = 30.0
+    BACKUP_MAX_INFLIGHT = 4       # a backup already answering this many chats hands new ones to the next backup
+
+    def __init__(self, primary: LLMProvider, *backups: LLMProvider,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        if not backups:
+            raise ValueError("FallbackProvider needs at least one backup")
         self._primary = primary
-        self._secondary = secondary
+        self._backups = list(backups)
+        self._skip_until: dict[int, float] = {}
+        self._inflight: dict[int, int] = {}
+        self._clock = clock
+
+    def _ready(self) -> list[tuple[int, LLMProvider]]:
+        """Backups in the order to try: not cooling and not full first (in configured order), then the rest."""
+        now = self._clock()
+        order = list(enumerate(self._backups))
+        free = [(i, b) for i, b in order
+                if self._skip_until.get(i, 0.0) <= now and self._inflight.get(i, 0) < self.BACKUP_MAX_INFLIGHT]
+        full = [(i, b) for i, b in order
+                if self._skip_until.get(i, 0.0) <= now and self._inflight.get(i, 0) >= self.BACKUP_MAX_INFLIGHT]
+        return free + sorted(full, key=lambda ib: self._inflight.get(ib[0], 0)) or order   # all cooling: try anyway
+
+    def _failed(self, index: int, call: str) -> None:
+        self._skip_until[index] = self._clock() + self.BACKUP_COOLDOWN
+        logger.warning("llm_backup_failed", backup=index + 1, call=call)
+
+    async def _through_backups(self, call: str, run: Callable[[LLMProvider], Awaitable], hold: bool = False):
+        """Returns (backup index, result). With hold=True the backup stays counted as busy until release() is called
+        (a stream is in flight for its whole length)."""
+        last: LLMBusyError | None = None
+        for index, backup in self._ready():
+            self._inflight[index] = self._inflight.get(index, 0) + 1
+            try:
+                result = await run(backup)
+                logger.warning("llm_backup_used", backup=index + 1, call=call)
+                if not hold:
+                    self._inflight[index] -= 1
+                return index, result
+            except LLMBusyError as exc:
+                self._inflight[index] -= 1
+                last = exc
+                self._failed(index, call)
+            except BaseException:
+                self._inflight[index] -= 1
+                raise
+        raise LLMBusyError("Every language model and backup is busy right now.") from last
 
     async def generate(self, prompt: str, system: str | None = None, temperature: float = 0.3,
                        max_tokens: int = 2048, json_mode: bool = False) -> str:
         try:
             return await self._primary.generate(prompt, system, temperature, max_tokens, json_mode)
         except LLMBusyError:
-            logger.warning("llm_secondary_used", call="generate")
-            return await self._secondary.generate(prompt, system, temperature, max_tokens, json_mode)
+            return (await self._through_backups(
+                "generate", lambda b: b.generate(prompt, system, temperature, max_tokens, json_mode)))[1]
 
     async def generate_stream(self, prompt: str, system: str | None = None, temperature: float = 0.3,
                               max_tokens: int = 2048) -> AsyncIterator[str]:
@@ -344,9 +394,20 @@ class FallbackProvider(LLMProvider):
         except StopAsyncIteration:
             return
         except LLMBusyError:
-            logger.warning("llm_secondary_used", call="stream")
-            async for token in self._secondary.generate_stream(prompt, system, temperature, max_tokens):
+            async def open_backup(backup: LLMProvider):
+                backup_stream = backup.generate_stream(prompt, system, temperature, max_tokens)
+                return backup_stream, await anext(backup_stream)      # the first token proves the backup works
+
+            try:
+                index, (backup_stream, token) = await self._through_backups("stream", open_backup, hold=True)
+            except StopAsyncIteration:
+                return
+            try:
                 yield token
+                async for token in backup_stream:
+                    yield token
+            finally:
+                self._inflight[index] -= 1
             return
         yield first
         async for token in stream:
@@ -356,18 +417,27 @@ class FallbackProvider(LLMProvider):
         try:
             return await self._primary.classify(text, categories, default)
         except LLMBusyError:
-            return await self._secondary.classify(text, categories, default)
+            return (await self._through_backups("classify", lambda b: b.classify(text, categories, default)))[1]
+
+
+def backup_configs(settings) -> list[tuple[str, str, str]]:
+    """The complete (base_url, api_key, model) backups, in order: LLM_FALLBACK_*, then LLM_FALLBACK2_*, LLM_FALLBACK3_*.
+    A half-filled set is ignored."""
+    out = []
+    for prefix in ("llm_fallback", "llm_fallback2", "llm_fallback3"):
+        url, key, model = (getattr(settings, f"{prefix}_{part}", "") for part in ("base_url", "api_key", "model"))
+        if url and key and model:
+            out.append((url, key, model))
+    return out
 
 
 def build_provider(settings) -> LLMProvider:
-    """Groq with its model pool, plus a backup provider when LLM_FALLBACK_* is configured."""
+    """Groq with its model pool, then every configured backup provider in order (see backup_configs)."""
     groq = GroqProvider(
         api_key=settings.groq_api_key or os.environ.get("GROQ_API_KEY"),
         llm_model=settings.groq_model,
         classifier_model=settings.groq_classifier_model,
         fallback_models=settings.groq_fallback_models,
     )
-    if settings.llm_fallback_base_url and settings.llm_fallback_api_key and settings.llm_fallback_model:
-        return FallbackProvider(groq, OpenAICompatibleProvider(
-            settings.llm_fallback_base_url, settings.llm_fallback_api_key, settings.llm_fallback_model))
-    return groq
+    backups = [OpenAICompatibleProvider(url, key, model, timeout=BACKUP_TIMEOUT) for url, key, model in backup_configs(settings)]
+    return FallbackProvider(groq, *backups) if backups else groq

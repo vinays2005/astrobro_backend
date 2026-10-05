@@ -1,6 +1,7 @@
 """LLM providers: Groq model failover with cool-downs, the backup provider, and how the routes report 'busy'."""
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -312,6 +313,114 @@ class TestFallbackProvider:
         assert [t async for t in FallbackProvider(Primary(stream=[]), Primary(stream=["x"])).generate_stream("q")] == []
 
 
+class TestBackupChain:
+    BUSY = LLMBusyError("busy")
+
+    async def test_backups_are_tried_in_order_until_one_answers(self):
+        chain = FallbackProvider(Primary(self.BUSY), Primary(self.BUSY), Primary("second"), Primary("third"))
+        assert await chain.generate("q") == "second"
+        assert await chain.classify("q", ["a"]) == "second"
+
+    async def test_a_stream_goes_to_the_first_backup_that_produces_a_token(self):
+        chain = FallbackProvider(Primary(stream=[self.BUSY]), Primary(stream=[self.BUSY]), Primary(stream=["x", "y"]))
+        assert [t async for t in chain.generate_stream("q")] == ["x", "y"]
+
+    async def test_when_every_backup_is_busy_the_chat_is_reported_busy(self):
+        chain = FallbackProvider(Primary(self.BUSY), Primary(self.BUSY), Primary(self.BUSY))
+        with pytest.raises(LLMBusyError):
+            await chain.generate("q")
+        with pytest.raises(LLMBusyError):
+            [t async for t in FallbackProvider(Primary(stream=[self.BUSY]), Primary(stream=[self.BUSY])).generate_stream("q")]
+
+    async def test_a_backup_that_just_failed_is_skipped_for_a_while(self):
+        clock = Clock()
+        calls = []
+
+        class Counting(Primary):
+            async def generate(self, *a, **kw):
+                calls.append(1)
+                raise LLMBusyError("used up")
+
+        chain = FallbackProvider(Primary(self.BUSY), Counting(), Primary("good"), clock=clock)
+        assert await chain.generate("q") == "good" and len(calls) == 1
+        assert await chain.generate("q") == "good" and len(calls) == 1          # skipped, no wasted wait
+        clock.t += FallbackProvider.BACKUP_COOLDOWN + 1
+        assert await chain.generate("q") == "good" and len(calls) == 2          # asked again after the pause
+
+    async def test_if_every_backup_is_cooling_they_are_still_tried(self):
+        clock = Clock()
+        flaky = Primary(self.BUSY)
+        chain = FallbackProvider(Primary(self.BUSY), flaky, clock=clock)
+        with pytest.raises(LLMBusyError):
+            await chain.generate("q")
+        flaky._generate = "recovered"
+        assert await chain.generate("q") == "recovered"
+
+    async def test_a_full_backup_hands_new_chats_to_the_next_one(self):
+        gate = asyncio.Event()
+
+        class Slow(Primary):
+            """Answers only when the gate opens, so chats pile up on it."""
+            def __init__(self, name):
+                super().__init__()
+                self.name, self.seen = name, 0
+
+            async def generate_stream(self, *a, **kw):
+                self.seen += 1
+                await gate.wait()
+                yield self.name
+
+        first, second = Slow("first"), Slow("second")
+        chain = FallbackProvider(Primary(stream=[self.BUSY]), first, second)
+        chain.BACKUP_MAX_INFLIGHT = 2
+
+        async def chat():
+            return [t async for t in chain.generate_stream("q")]
+
+        tasks = [asyncio.create_task(chat()) for _ in range(5)]
+        await asyncio.sleep(0.05)
+        assert (first.seen, second.seen) == (3, 2)          # two each; the fifth, with both full, goes to the first
+        gate.set()
+        answers = await asyncio.gather(*tasks)
+        assert all(a in (["first"], ["second"]) for a in answers) and len(answers) == 5
+
+    async def test_a_finished_stream_frees_its_place_on_the_backup(self):
+        chain = FallbackProvider(Primary(stream=[self.BUSY]), Primary(stream=["x"]))
+        for _ in range(3):
+            assert [t async for t in chain.generate_stream("q")] == ["x"]
+        assert chain._inflight == {0: 0}
+
+    async def test_a_cancelled_chat_frees_its_place_too(self):
+        started = asyncio.Event()
+
+        class Hangs(Primary):
+            async def generate_stream(self, *a, **kw):
+                yield "token"
+                started.set()
+                await asyncio.sleep(30)
+
+        chain = FallbackProvider(Primary(stream=[self.BUSY]), Hangs())
+
+        async def chat():
+            async for _ in chain.generate_stream("q"):
+                pass
+
+        task = asyncio.create_task(chat())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert chain._inflight == {0: 0}
+
+    async def test_other_errors_from_a_backup_are_not_hidden(self):
+        with pytest.raises(ValueError):
+            await FallbackProvider(Primary(self.BUSY), Primary(ValueError("bug"))).generate("q")
+
+    def test_a_chain_needs_a_backup(self):
+        with pytest.raises(ValueError):
+            FallbackProvider(Primary("x"))
+
+
 class TestBuildProvider:
     def settings(self, **kw):
         base = dict(groq_api_key="k", groq_model="model-a", groq_classifier_model="model-a",
@@ -331,6 +440,30 @@ class TestBuildProvider:
     def test_a_half_configured_backup_is_ignored(self, monkeypatch):
         monkeypatch.setattr(provider, "AsyncGroq", lambda **kw: MagicMock())
         assert isinstance(build_provider(self.settings(llm_fallback_base_url="https://x/v1")), GroqProvider)
+
+    def test_three_complete_backups_are_chained_in_order(self, monkeypatch):
+        monkeypatch.setattr(provider, "AsyncGroq", lambda **kw: MagicMock())
+        built = build_provider(self.settings(
+            llm_fallback_base_url="https://a/v1", llm_fallback_api_key="k", llm_fallback_model="ma",
+            llm_fallback2_base_url="https://b/v1", llm_fallback2_api_key="k", llm_fallback2_model="mb",
+            llm_fallback3_base_url="https://c/v1", llm_fallback3_api_key="k", llm_fallback3_model="mc"))
+        assert isinstance(built, FallbackProvider)
+        assert [b._model for b in built._backups] == ["ma", "mb", "mc"]
+        assert all(b._timeout == provider.BACKUP_TIMEOUT for b in built._backups)
+
+    def test_a_half_filled_later_backup_is_skipped_but_the_rest_stay(self, monkeypatch):
+        monkeypatch.setattr(provider, "AsyncGroq", lambda **kw: MagicMock())
+        built = build_provider(self.settings(
+            llm_fallback_base_url="https://a/v1", llm_fallback_api_key="k", llm_fallback_model="ma",
+            llm_fallback2_base_url="https://b/v1",
+            llm_fallback3_base_url="https://c/v1", llm_fallback3_api_key="k", llm_fallback3_model="mc"))
+        assert [b._model for b in built._backups] == ["ma", "mc"]
+
+    def test_the_second_and_third_backup_alone_are_enough(self, monkeypatch):
+        monkeypatch.setattr(provider, "AsyncGroq", lambda **kw: MagicMock())
+        built = build_provider(self.settings(
+            llm_fallback2_base_url="https://b/v1", llm_fallback2_api_key="k", llm_fallback2_model="mb"))
+        assert isinstance(built, FallbackProvider) and [b._model for b in built._backups] == ["mb"]
 
     def test_the_default_pool_includes_a_second_model(self):
         from app.config import Settings
