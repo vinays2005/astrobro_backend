@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -43,6 +44,9 @@ AsyncSessionLocal = async_sessionmaker(
 
 async def init_db() -> None:
     """Create all tables. Call at startup."""
+    if "sqlite" in _db_url and ":memory:" not in _db_url:
+        # A fresh checkout has no data/ folder, and SQLite will not create it.
+        Path(_db_url.split("///", 1)[-1]).parent.mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
