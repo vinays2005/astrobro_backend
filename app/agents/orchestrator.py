@@ -38,6 +38,28 @@ QueryType = Literal["topic_analysis", "simple_factual", "chat"]
 
 _HISTORY_TURNS = 4          # earlier messages sent along with a question
 _HISTORY_CHARS = 500        # an earlier answer is cut to this many characters
+_EVIDENCE_CHUNK_CHARS = 900   # one book passage is cut to about this many characters
+_EVIDENCE_TOTAL_CHARS = 2400  # all passages together; the free LLM tier is limited by tokens per minute
+
+
+def _trim_evidence(chunks: list[dict]) -> list[dict]:
+    """Keep the best-ranked passages but cap their length, cutting at a sentence or word end, so one chat does
+    not spend most of the token budget on long book excerpts."""
+    out: list[dict] = []
+    left = _EVIDENCE_TOTAL_CHARS
+    for chunk in chunks:
+        if left < 200:
+            break
+        text = str(chunk.get("text", "")).strip()
+        limit = min(_EVIDENCE_CHUNK_CHARS, left)
+        if len(text) > limit:
+            cut = text[:limit - 4]                 # room for the " ..." marker
+            end = max(cut.rfind(". "), cut.rfind(".\n"))
+            cut = cut[:end + 1] if end > limit * 0.5 else cut[:cut.rfind(" ")] if " " in cut else cut
+            text = cut.rstrip() + " ..."
+        left -= len(text)
+        out.append({**chunk, "text": text})
+    return out
 
 
 def _compact_json(value: object) -> str:
@@ -313,7 +335,7 @@ class AgentOrchestrator:
 
         chart_json = chart_to_text(state.chart)
         dasha_json = dasha_to_text(state.dasha)
-        evidence_wrapped = wrap_evidence_list(state.retrieved_evidence)
+        evidence_wrapped = wrap_evidence_list(_trim_evidence(state.retrieved_evidence))
 
         prompt = CHAT_PROMPT.format(
             chart_json=chart_json,
@@ -380,7 +402,7 @@ class AgentOrchestrator:
             evidence_chunks = await self._retriever.retrieve(
                 query=user_input, top_k=6, rerank_top_k=3, scope=scope_for(user_input)
             )
-            evidence_list = [{"text": c.text, "metadata": c.metadata} for c in evidence_chunks]
+            evidence_list = _trim_evidence([{"text": c.text, "metadata": c.metadata} for c in evidence_chunks])
         except Exception:
             evidence_list = []
 

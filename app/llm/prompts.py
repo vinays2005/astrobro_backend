@@ -33,12 +33,19 @@ CRITICAL RULES:
    Jyotish topics. Answer them fully using chart data — never refuse these as inappropriate.
 """
 
+_JSON_RULE = "6. Always return valid JSON in the exact schema requested — no markdown fences around it."
+
+
 def system_prompt(language: str | None = None, json_output: bool = True) -> str:
     """SYSTEM_ASTROLOGER plus a language rule when the user asked for a non-English answer."""
     from app.services.languages import language_directive
 
     extra = language_directive(language, json_output)
-    return SYSTEM_ASTROLOGER if not extra else SYSTEM_ASTROLOGER + extra + "\n"
+    base = SYSTEM_ASTROLOGER
+    if not json_output:
+        # plain-text answers: do not tell the model to return JSON (it contradicts the prompt that follows)
+        base = base.replace(_JSON_RULE, "6. Answer in plain text exactly as the request asks.")
+    return base if not extra else base + extra + "\n"
 
 
 PREDICTION_PROMPT = """Generate a Vedic astrology interpretation using ONLY the verified data below.
