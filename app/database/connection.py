@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -33,7 +34,8 @@ if "postgresql" in _db_url or "asyncpg" in _db_url:
         _db_url = "sqlite+aiosqlite:///./data/astrobro.db"
 
 # SQLite is only used for development and tests: a fresh connection per use avoids sharing one across event loops.
-_pool_args = {"poolclass": NullPool} if "sqlite" in _db_url else {}
+# The test suite sets ASTROBRO_NULL_POOL=1 for the same reason when it runs against Postgres (each test has its own loop).
+_pool_args = {"poolclass": NullPool} if "sqlite" in _db_url or os.environ.get("ASTROBRO_NULL_POOL") == "1" else {}
 
 engine = create_async_engine(
     _db_url,

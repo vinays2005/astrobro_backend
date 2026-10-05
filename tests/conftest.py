@@ -10,7 +10,8 @@ import tempfile
 import pytest
 
 _TMP = tempfile.mkdtemp(prefix="astrobro-tests-")
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + _TMP.replace("\\", "/") + "/test.db"
+# TEST_DATABASE_URL lets the same suite run against a real Postgres (scripts/pg_tests.py); the default is a temp SQLite file.
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or ("sqlite+aiosqlite:///" + _TMP.replace("\\", "/") + "/test.db")
 for _name in ("GROQ_API_KEY", "QDRANT_URL", "QDRANT_API_KEY", "API_KEY", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
               "RAZORPAY_WEBHOOK_SECRET", "REQUIRE_ID_TOKEN", "ADMIN_EMAILS", "ADMIN_UIDS"):
     os.environ[_name] = ""
