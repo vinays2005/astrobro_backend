@@ -134,6 +134,19 @@ class TestDependencies:
         r = await client.get("/api/me", headers=bearer(who))
         assert r.status_code == 200 and r.json()["uid"] == who and r.json()["plan"] == "free"
 
+    async def test_a_phone_sign_in_has_no_email_and_is_still_a_normal_account(self, client):
+        """Phone OTP users have a uid and a phone number but no email or name: everything must still work."""
+        install_verifier()
+        who = uid()
+        headers = bearer(who, email=None, verified=False, name=None)
+        me = await client.get("/api/me", headers=headers)
+        assert me.status_code == 200
+        body = me.json()
+        assert body["uid"] == who and body["email"] is None and body["plan"] == "free" and body["is_admin"] is False
+        assert (await client.get("/api/wallet", headers=headers)).status_code == 200
+        assert (await client.get("/api/me/memories", headers=headers)).json() == {"memories": []}
+        assert (await client.get("/api/me", headers=headers)).json()["uid"] == who        # and again: no duplicate-account error
+
     async def test_admin_by_verified_email_or_uid(self, client, monkeypatch):
         install_verifier()
         settings = get_settings()
