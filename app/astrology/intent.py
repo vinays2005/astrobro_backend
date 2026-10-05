@@ -110,7 +110,13 @@ CATEGORIES: dict[str, dict] = {
     "panchang": {
         "topic": "general", "specialty": "Panchang and festivals", "modules": ["panchang", "festivals"],
         "keywords": ["panchang", "tithi", "nakshatra today", "rahu kaal", "rahu kalam", "choghadiya", "ekadashi", "amavasya",
-                     "purnima", "festival", "sunrise", "sunset", "moonrise"],
+                     "purnima", "festival", "sunrise", "sunset", "moonrise",
+                     # festival names ("holi" alone would also match holiday and holistic)
+                     "diwali", "deepavali", "holika", "holi festival", "navratri", "navaratri", "dussehra", "dasara",
+                     "vijayadashami", "janmashtami", "raksha bandhan", "rakhi", "ganesh chaturthi", "makar sankranti",
+                     "sankranti", "pongal", "onam", "karwa chauth", "shivratri", "mahashivratri", "ram navami",
+                     "hanuman jayanti", "akshaya tritiya", "vasant panchami", "guru purnima", "dhanteras", "bhai dooj",
+                     "chhath", "lohri", "baisakhi", "ugadi", "gudi padwa", "durga puja", "pradosh"],
     },
     "kundli": {
         "topic": "general", "specialty": "Kundli and birth chart", "modules": ["kundli", "dasha", "dosha"],

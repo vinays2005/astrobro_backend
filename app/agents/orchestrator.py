@@ -29,6 +29,7 @@ from app.llm.prompts import (
     VERIFICATION_PROMPT,
 )
 from app.rag.retrieval import HybridRetriever
+from app.rag.scope import scope_for
 from app.rules.engine import RuleEngine
 from app.security.sanitization import wrap_evidence_list
 
@@ -89,6 +90,7 @@ class AgentOrchestrator:
             collection_name=_s.books_collection,
             embedding_dimension=_s.embedding_dimension,
             reranker_enabled=False,
+            specialist_collection=_s.specialist_collection,
         )
         self._rules = rules or RuleEngine()
 
@@ -196,6 +198,7 @@ class AgentOrchestrator:
             query=f"{topic} {state.user_input}",
             top_k=8,
             rerank_top_k=4,
+            scope=scope_for(state.user_input),
         )
         for chunk in evidence:
             state.retrieved_evidence.append({
@@ -291,7 +294,7 @@ class AgentOrchestrator:
     ) -> None:
         """Conversational: RAG → LLM chat → Response."""
         evidence = await self._retriever.retrieve(
-            query=state.user_input, top_k=6, rerank_top_k=3
+            query=state.user_input, top_k=6, rerank_top_k=3, scope=scope_for(state.user_input)
         )
         for chunk in evidence:
             state.retrieved_evidence.append({
@@ -366,7 +369,7 @@ class AgentOrchestrator:
 
         try:
             evidence_chunks = await self._retriever.retrieve(
-                query=user_input, top_k=6, rerank_top_k=3
+                query=user_input, top_k=6, rerank_top_k=3, scope=scope_for(user_input)
             )
             evidence_list = [{"text": c.text, "metadata": c.metadata} for c in evidence_chunks]
         except Exception:

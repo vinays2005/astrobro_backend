@@ -6,8 +6,11 @@ Data pipeline:
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
+
+from app.rag.scope import HIDDEN_TITLES, Scope
 
 
 @dataclass
@@ -34,6 +37,7 @@ class HybridRetriever:
         collection_name: str = "vedic_books",
         embedding_dimension: int = 384,
         reranker_enabled: bool = False,
+        specialist_collection: str = "",
     ) -> None:
         # fastembed uses ONNX Runtime (~80 MB) instead of PyTorch (~400 MB).
         # Drop-in replacement for SentenceTransformer for vector search.
@@ -46,6 +50,9 @@ class HybridRetriever:
         self._reranker = None
 
         self._collection_name = collection_name
+        # Optional collection of specialist books (tarot, numerology, ...). Never created here: it is
+        # filled by scripts/free_books.py, and searches simply skip it while it does not exist.
+        self._specialist_collection = specialist_collection
         self._qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key or None,timeout=120,)
 
         # Qdrant needs the collection created up front with a fixed vector
@@ -162,15 +169,19 @@ class HybridRetriever:
         top_k: int = 20,
         rerank_top_k: int = 5,
         metadata_filter: dict[str, Any] | None = None,
+        scope: Scope | None = None,
     ) -> list[RetrievedChunk]:
         """Hybrid retrieval: vector + BM25 → RRF merge → optional rerank.
+
+        scope routes the search (see app.rag.scope): which collections and specialist domains may be read.
+        With scope=None nothing is filtered by title or domain.
 
         All CPU-bound and blocking I/O calls are offloaded to a thread pool
         via asyncio.to_thread() so the event loop stays free to serve other
         requests concurrently.
         """
         import asyncio
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
         # ONNX inference is fast; run in thread to keep event loop free
         raw_emb = await asyncio.to_thread(
@@ -178,24 +189,44 @@ class HybridRetriever:
         )
         query_emb = raw_emb.tolist()
 
-        qfilter = None
-        if metadata_filter:
-            qfilter = Filter(
-                must=[
-                    FieldCondition(key=k, match=MatchValue(value=v))
-                    for k, v in metadata_filter.items()
-                ]
-            )
+        must = [
+            FieldCondition(key=k, match=MatchValue(value=v))
+            for k, v in (metadata_filter or {}).items()
+        ]
 
-        # I/O-bound: sync Qdrant HTTP call blocks the event loop — run in thread
-        qdrant_result = await asyncio.to_thread(
-            self._qdrant.query_points,
-            collection_name=self._collection_name,
-            query=query_emb,
-            limit=top_k,
-            query_filter=qfilter,
-        )
-        vec_results = qdrant_result.points
+        # (collection, filter, optional): an optional collection that cannot be searched is skipped,
+        # the main one still fails loudly.
+        searches: list[tuple[str, Any, bool]] = []
+        if scope is None:
+            searches.append((self._collection_name, Filter(must=must) if must else None, False))
+        else:
+            if scope.general:
+                hidden = FieldCondition(key="book", match=MatchAny(any=list(HIDDEN_TITLES)))
+                searches.append((self._collection_name, Filter(must=must or None, must_not=[hidden]), False))
+            if scope.domains and self._specialist_collection:
+                in_domain = FieldCondition(key="domain", match=MatchAny(any=list(scope.domains)))
+                searches.append((self._specialist_collection, Filter(must=[in_domain]), True))
+
+        async def search(name: str, flt: Any, optional: bool) -> list[Any]:
+            try:
+                # I/O-bound: sync Qdrant HTTP call blocks the event loop — run in thread
+                result = await asyncio.to_thread(
+                    self._qdrant.query_points,
+                    collection_name=name,
+                    query=query_emb,
+                    limit=top_k,
+                    query_filter=flt,
+                )
+                return list(result.points)
+            except Exception as exc:
+                if not optional:
+                    raise
+                logging.getLogger(__name__).warning("specialist_search_skipped collection=%s error=%s", name, exc)
+                return []
+
+        batches = await asyncio.gather(*(search(*s) for s in searches))
+        # Same model and metric in every collection, so raw cosine scores are comparable.
+        vec_results = sorted((p for batch in batches for p in batch), key=lambda p: p.score, reverse=True)[:top_k]
 
         vector_chunks: list[RetrievedChunk] = [
             RetrievedChunk(
@@ -208,13 +239,16 @@ class HybridRetriever:
         ]
 
         bm25_chunks: list[RetrievedChunk] = []
-        if self._bm25 is not None and self._bm25_docs:
+        # The in-process BM25 index only holds main-collection documents.
+        if self._bm25 is not None and self._bm25_docs and (scope is None or scope.general):
             # CPU-bound: BM25 scores 34k docs in pure Python — run in thread
             tokenized = self._tokenize(query)
             scores = await asyncio.to_thread(self._bm25.get_scores, tokenized)
             top_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
             for idx in top_idx:
                 if scores[idx] > 0:
+                    if scope is not None and self._bm25_docs[idx]["metadata"].get("book") in HIDDEN_TITLES:
+                        continue
                     bm25_chunks.append(RetrievedChunk(
                         text=self._bm25_docs[idx]["text"],
                         metadata=self._bm25_docs[idx]["metadata"],

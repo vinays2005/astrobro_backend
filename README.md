@@ -137,9 +137,44 @@ Calculated endpoints are unaffected. Move to a paid Groq tier before real traffi
 
 ## Knowledge base (RAG)
 
-Reference books are chunked and stored in Qdrant. Only texts that are public domain or otherwise legally free
-to redistribute should be ingested. Do not upload copyrighted books to the public repository or the knowledge
-base.
+Reference books are chunked and stored in Qdrant, in two collections:
+
+| Collection | Holds | Read by |
+|------------|-------|---------|
+| `vedic_books` (`BOOKS_COLLECTION`) | Vedic astrology texts | every chat and prediction |
+| `specialist_books` (`SPECIALIST_COLLECTION`) | tarot, numerology, Vastu, festivals, calendar science, Puranic lore | only questions on those topics |
+
+Each question is routed by its detected topic (`app/rag/scope.py`): tarot and numerology questions read only their
+own books; Vastu, panchang, muhurat and remedy questions read the Vedic collection plus the matching specialist
+domains; everything else reads the Vedic collection only. A tarot book can therefore never answer a question about
+Saturn's transit. `HIDDEN_TITLES` in the same file lists titles in the Vedic collection that belong to other
+traditions (Hellenistic, medieval Christian, modern Western) and are never quoted; edit it to change that.
+If the specialist collection is missing, searches skip it and the chat keeps working.
+
+Only texts that are public domain or otherwise legally free to redistribute should be ingested. Do not upload
+copyrighted books to the public repository or the knowledge base.
+
+### Public-domain specialist books
+
+`app/rag/free_books.py` lists each book with its source, licence and the reason it is free to use; the
+downloaded texts stay in `books_free/` (git-ignored).
+
+| Domain | Books |
+|--------|-------|
+| tarot | The Pictorial Key to the Tarot (A.E. Waite, 1911) |
+| numerology | The Kabala of Numbers (Sepharial, 1911); Cheiro's Book of Numbers (1926) |
+| vastu | Essay on the Architecture of the Hindus (Ram Raz, 1834) |
+| festivals | Hindu Holidays and Ceremonials (B.A. Gupte, 1916) |
+| calendar | The Indian Calendar (Sewell and Dikshit, 1896); Surya-Siddhanta (Burgess, 1860) |
+| lore | Agni Purana and Garuda Purana (M.N. Dutt translations, 1903-08), keeping the passages on planets, gems, house building and vratas |
+
+```bash
+python scripts/free_books.py plan              # chunk counts per book; uploads nothing
+python scripts/free_books.py fetch             # download the texts from the Internet Archive
+python scripts/free_books.py ingest            # embed and upload (idempotent)
+python scripts/free_books.py verify            # counts and sample searches per domain
+python scripts/free_books.py rollback --yes    # remove everything this batch uploaded
+```
 
 ---
 

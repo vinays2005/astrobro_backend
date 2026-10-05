@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     qdrant_url: str = ""
     qdrant_api_key: str = ""
     books_collection: str = "vedic_books"
+    # Separate collection for specialist books (tarot, numerology, Vastu, festivals, calendar, lore);
+    # only questions on those topics read it. Empty disables it.
+    specialist_collection: str = "specialist_books"
 
     # Astrology
     ayanamsa: str = "LAHIRI"
